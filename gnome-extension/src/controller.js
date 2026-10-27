@@ -34,6 +34,7 @@ import {KeyboardWatcher, OsdHook, TopBar} from './shell.js';
 import {ShelfHelper} from './shelfHelper.js';
 import {CallPage} from './pages/call.js';
 import {CalendarPage} from './pages/calendar.js';
+import {DevicesPage} from './pages/devices.js';
 import {MediaPage} from './pages/media.js';
 import {NotificationsPage} from './pages/notifications.js';
 import {ShelfPage} from './pages/shelf.js';
@@ -322,6 +323,7 @@ export class Controller {
             () => new ShelfPage(this._daemon, this._clipboard, this._settings, size),
             () => new CalendarPage(this._daemon, size),
             () => new UsagePage(this._daemon, size),
+            () => new DevicesPage(this._daemon, size),
         ];
     }
 
@@ -766,7 +768,9 @@ export class Controller {
         // CSS ones (padding) are divided by `scale` again, as St multiplies them.
         const scale = uiScale();
         const top = this._onBar ? this._topBar.height : 0;
-        const inBar = this._onBar && this._settings.get_boolean('island-in-top-bar');
+        // The closed island keeps the size it has in the bar on a display without one: moving the island
+        // there must not shrink it (see the compact case below).
+        const inBar = this._settings.get_boolean('island-in-top-bar');
         // Before measuring it: inside the bar it is smaller.
         this._compact.inBar = inBar;
 
@@ -803,7 +807,7 @@ export class Controller {
         default:
             size = {
                 width: this._compact.preferredWidth,
-                height: inBar ? top : top + this._settings.get_int('notch-depth') * scale,
+                height: inBar ? this._topBar.height : top + this._settings.get_int('notch-depth') * scale,
                 radius: (inBar ? IN_BAR_RADIUS : COMPACT_RADIUS) * scale,
                 shoulder: (inBar ? IN_BAR_SHOULDER : COMPACT_SHOULDER) * scale,
             };

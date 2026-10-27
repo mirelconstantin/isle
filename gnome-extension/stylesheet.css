@@ -16,7 +16,8 @@
  * ones ("11:10" and "isle-0.9.1" would space out). */
 .isle-compact-clock, .isle-compact-second-time, .isle-header-time, .isle-recording-time,
 .isle-timer-time, .isle-stepper-value, .isle-time, .isle-volume-text, .isle-peek-value,
-.isle-call-duration, .isle-reminders-count, .isle-cal-event-time, .isle-cal-day, .isle-usage-percent {
+.isle-call-duration, .isle-reminders-count, .isle-cal-event-time, .isle-cal-day, .isle-usage-percent,
+.isle-device-battery {
   font-feature-settings: "tnum";
 }
 
@@ -961,6 +962,19 @@
 .isle-usage-dot { width: 6px; height: 6px; border-radius: 3px; background-color: rgba(255, 255, 255, 0.22); transition-duration: 200ms; }
 .isle-usage-dot:hover { background-color: rgba(255, 255, 255, 0.45); }
 .isle-usage-dot.shown { height: 16px; background-color: #ffffff; }
+
+/* ── Devices ──────────────────────────────────────────── */
+
+/* The Bluetooth devices connected now (devices.js), a row each: its icon, name, and the battery
+ * BlueZ reports, or "No battery" for one that reports none. */
+.isle-devices-scroll { -st-vfade-offset: 14px; }
+.isle-devices-list { spacing: 2px; }
+.isle-device { spacing: 10px; min-height: 26px; padding: 0 8px; }
+.isle-device-icon { color: rgba(255, 255, 255, 0.9); }
+.isle-device-name { font-size: 13px; font-weight: 600; }
+.isle-device-battery { font-size: 13px; font-weight: 700; color: rgba(255, 255, 255, 0.9); }
+.isle-device-battery.low { color: #ff453a; }
+.isle-device-nobattery { font-size: 11px; color: rgba(255, 255, 255, 0.45); }
 
 /* Focused (from the keyboard), a button lights up: no ring around it. */
 .isle-pill:focus, .isle-pill-small:focus, .isle-notification-row:focus, .isle-output-button:focus,

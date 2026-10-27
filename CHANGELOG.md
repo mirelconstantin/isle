@@ -6,6 +6,16 @@ All notable changes to Isle are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- A Devices page listing the Bluetooth devices connected now, each with the battery it reports
+  ("No battery" for one that reports none, as many phones do).
+
+### Fixed
+
+- With the island following the display in use, the closed island is the same size on a display without
+  a top bar as on the main one: it no longer shrinks (256×30 against 232×48) when it moves there.
+
 ## [1.3.1] - 2026-10-26
 
 ### Fixed

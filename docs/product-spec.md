@@ -119,14 +119,16 @@ call starts → Call during a call → Notifications if some arrived unseen
 runs → Music.
 
 Pages, in order: **Call** (only during a call) **· Music · Notifications ·
-Focus · Reminders · Shelf · Calendar · Usage** (Usage only with an AI plan found), one tab each in the header. Lists scroll with the wheel or touchpad and never show
-a scrollbar.
+Focus · Reminders · Shelf · Calendar · Usage** (Usage only with an AI plan
+found) **· Devices**, one tab each in the header. Lists scroll with the wheel
+or touchpad and never show a scrollbar.
 
 ## 4. Closed island
 
 - Where it is: on the main display, in its top bar; or (Settings) on the display of the window in use,
-  moving there once closed. A display without the top bar has the island hang from its top edge, with
-  a header of its own when open, and GNOME's clock comes back to the main top bar meanwhile.
+  moving there once closed. A display without the top bar has the closed island hang from its top edge
+  at the size it has in the bar; the open one has a header of its own, and GNOME's clock comes back to
+  the main top bar meanwhile.
 - Right slot, first that applies: a warning (Isle's service stopped; a click offers to restart it) →
   the bot, 18 px, in the look chosen, blinking and glancing every few seconds (the assistant works on
   a request or a command runs with the island closed; a click shows it) →
@@ -329,6 +331,12 @@ desktop's calendars (Evolution, and accounts added in Settings → Online
 Accounts such as Google; blue; to read, not to click) and Isle's own
 (orange; × on hover to remove), kept by `isled` and forgotten after 400
 days.
+
+**Devices**, the Bluetooth devices connected now, one row
+each: the device's icon, its name, and the battery it reports ("85%", red at
+20% or under), or "No battery" for one that reports none (many phones do
+not). Rows scroll past what fits. Empty: "No devices". The list is what
+BlueZ reports, so a device that is paired but not connected is not shown.
 
 ## 6. Alerts
 
