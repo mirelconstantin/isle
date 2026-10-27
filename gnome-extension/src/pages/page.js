@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 // Base class for the pages of the expanded island.
 
@@ -8,6 +9,7 @@ import St from 'gi://St';
 
 import {onUiScale} from '../compat.js';
 
+/** Subclasses override the getters and hooks below; timeouts and daemon handlers end with the page. */
 export const Page = GObject.registerClass({
     Signals: {
         // The page needs keyboard input (true) or is done with it (false).
@@ -60,13 +62,30 @@ export const Page = GObject.registerClass({
         }
     }
 
+    /** Whether the page is on screen now. */
     get active() {
         return this._active;
     }
 
     /** Whether the page has a tab now; the Call page only has one during a call. */
     get available() {
-        return true;
+        return !this._hidden;
+    }
+
+    /** Left out of the island in Settings: no tab, so never shown. */
+    get hidden() {
+        return Boolean(this._hidden);
+    }
+
+    /** Emits `availability-changed`, so the tab comes or goes. */
+    set hidden(hidden) {
+        if (Boolean(this._hidden) === hidden)
+            return;
+        this._hidden = hidden;
+        this.emit('availability-changed');
+        // Changed while left out: laid out ahead now that it can be shown again.
+        if (!hidden && this.cold)
+            this.emit('cold');
     }
 
     /** Whether the page has something to show; used to pick a default page. */
@@ -94,8 +113,10 @@ export const Page = GObject.registerClass({
         return 'wash';
     }
 
+    /** Called as the page comes on screen. */
     onActivate() {}
 
+    /** Called as it goes; timeouts not kept are cancelled right after. */
     onDeactivate() {}
 
     /** Readies, while shown out of sight, what its showing would build (see `Expanded.warmPage`). */
@@ -110,7 +131,9 @@ export const Page = GObject.registerClass({
         if (this.cold || (this.mapped && !force))
             return;
         this.cold = true;
-        this.emit('cold');
+        // Left out, it is never shown: nothing to lay out until it is back.
+        if (!this.hidden)
+            this.emit('cold');
     }
 
     /** Calls `callback` whenever one of the daemon's `keys` changes. */
@@ -142,6 +165,7 @@ export const Page = GObject.registerClass({
         this._timeouts.set(name, id);
     }
 
+    /** Drops the pending timeout of that name, if any. */
     cancel(name) {
         const id = this._timeouts.get(name);
         if (id) {
@@ -150,11 +174,13 @@ export const Page = GObject.registerClass({
         }
     }
 
+    /** Drops every pending timeout, kept ones too. */
     cancelAll() {
         for (const name of [...this._timeouts.keys()])
             this.cancel(name);
     }
 
+    /** Stops timers and daemon handlers, and stops `later` from scheduling more. */
     _onPageDestroy() {
         this._destroyed = true;
         this.cancelAll();

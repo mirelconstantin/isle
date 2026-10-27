@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 // Turns Do Not Disturb on for focus phases, and only ever undoes what it did.
 // That is saved, so it survives the lock screen (DND stays on) and shell crashes.
@@ -7,6 +8,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 /** Keeps Do Not Disturb in step with the focus timer. */
 export class FocusMode {
+    /** Follows the pomodoro phase, the DND switch and the focus-dnd setting. */
     constructor(daemon, notifications, settings) {
         this._daemon = daemon;
         this._notifications = notifications;
@@ -34,11 +36,13 @@ export class FocusMode {
         return this._settings.get_boolean('focus-dnd-owned');
     }
 
+    /** Saves the claim, writing only when it changes. */
     set _owned(owned) {
         if (owned !== this._owned)
             this._settings.set_boolean('focus-dnd-owned', owned);
     }
 
+    /** Turns DND on when a focus phase starts and off when Isle's own claim ends. */
     _sync() {
         const phase = this._daemon.state.pomodoro?.phase;
         // Not known until isled answers; don't switch anything off before.
@@ -55,12 +59,14 @@ export class FocusMode {
         }
     }
 
+    /** Sets DND without mistaking the change for the user's own. */
     _setDnd(on) {
         this._changing = true;
         this._notifications.dnd = on;
         this._changing = false;
     }
 
+    /** Disconnects, and gives DND back unless the screen is locked. */
     destroy() {
         this._daemon.disconnect(this._daemonId);
         this._notifications.disconnect(this._dndId);

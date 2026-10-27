@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 // Mic, camera (from isled), screen sharing and recording; all event driven.
 // Mic streams that only meter input (sound settings) are ignored, as GNOME does.
@@ -16,6 +17,7 @@ export const LEVEL_METERS = ['org.gnome.VolumeControl', 'org.PulseAudio.pavucont
 
 /** Signals: `changed` (any state), `recording-started` (GNOME's screen recorder). */
 export class PrivacyMonitor extends Signals.EventEmitter {
+    /** Starts from what is in use now and follows each source's own signals. */
     constructor(daemon) {
         super();
         this._daemon = daemon;
@@ -57,20 +59,24 @@ export class PrivacyMonitor extends Signals.EventEmitter {
         return this.microphone || this.camera || this.screenShare;
     }
 
+    /** Stops GNOME's screen recording, from the island's stop button. */
     stopRecording() {
         this._screenshotUI.stopScreencast();
     }
 
+    /** Any app recording sound, level meters aside. */
     _syncMicrophone() {
         const inUse = this._mixer.get_source_outputs()
             .some(stream => !LEVEL_METERS.includes(stream.get_application_id()));
         this._set('microphone', inUse);
     }
 
+    /** The camera as isled sees it. */
     _syncCamera() {
         this._set('camera', Boolean(this._daemon.state.system?.camera_in_use));
     }
 
+    /** Notes when a screen recording starts or stops, and when it began. */
     _syncRecording() {
         const recording = this._screenshotUI.screencast_in_progress;
         if (recording === this.recording)
@@ -97,6 +103,7 @@ export class PrivacyMonitor extends Signals.EventEmitter {
         }
     }
 
+    /** Shares known by handle, plus one only GNOME's indicator knows about, until it hides. */
     _syncShares() {
         const unknown = Boolean(this._indicator?.visible);
         if (this._indicator && !unknown) {
@@ -106,6 +113,7 @@ export class PrivacyMonitor extends Signals.EventEmitter {
         this._set('screenShare', this._shares.size > 0 || unknown);
     }
 
+    /** Counts a new screen share until it stops. */
     _onHandle(handle) {
         // Recordings are covered by the screen recorder state above.
         if (handle.is_recording)
@@ -118,6 +126,7 @@ export class PrivacyMonitor extends Signals.EventEmitter {
         this._set('screenShare', true);
     }
 
+    /** Sets one state, emitting `changed` only on a real change. */
     _set(key, value) {
         if (this[key] === value)
             return;
@@ -125,6 +134,7 @@ export class PrivacyMonitor extends Signals.EventEmitter {
         this.emit('changed');
     }
 
+    /** Disconnects from every source. */
     destroy() {
         // Tell no one about changes made while tearing down.
         this.disconnectAll();

@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
-//! The agent loop: the AI may answer with tools isled runs here (find_files, recent_files, top_processes…)
-//! and with desktop actions the extension runs (open_app, window, arrange…). Until it says it is done, the
-//! results of both go back to it, so it can take one step after another; each shows on the island. Its
-//! last step runs before it answers too, so a failure is never answered as done.
+//! The agent loop: tools isled runs (find_files, check…) and desktop actions the extension runs go back to the AI
+//! step by step until it is done; its last step runs before it answers too, so a failure is never answered as done.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -117,6 +116,7 @@ const TOOLS: &[&str] = &[
     "check",
 ];
 
+/// One of `TOOLS`.
 fn is_tool(action: &Value) -> bool {
     action["type"]
         .as_str()
@@ -130,6 +130,7 @@ pub fn after_close(action: &Value) -> bool {
         .is_some_and(|kind| AFTER_CLOSE.contains(&kind))
 }
 
+/// The user's home folder, empty if it cannot be found.
 fn home() -> PathBuf {
     dirs::home_dir().unwrap_or_default()
 }
@@ -165,6 +166,7 @@ fn describe(call: &Value) -> String {
     }
 }
 
+/// The `path` asked for, or ~.
 fn path_of(call: &Value) -> &str {
     call["path"]
         .as_str()
@@ -172,6 +174,7 @@ fn path_of(call: &Value) -> &str {
         .unwrap_or("~")
 }
 
+/// A list of words, or one word on its own, as AIs write either.
 fn strings(value: &Value) -> Vec<String> {
     match value {
         Value::Array(items) => items
@@ -193,6 +196,7 @@ async fn run(call: Value) -> String {
         .unwrap_or_else(|err| format!("the search failed: {err}"))
 }
 
+/// The file and app tools, blocking.
 fn run_now(call: &Value, home: &Path) -> String {
     match call["type"].as_str() {
         Some("find_files") => match files::root(call["in"].as_str().unwrap_or(""), home) {
@@ -235,6 +239,7 @@ pub type Desk = UnboundedSender<Act>;
 pub struct TooLong;
 
 impl fmt::Display for TooLong {
+    /// The reason, in words.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("the AI took too long to answer")
     }
@@ -244,6 +249,7 @@ impl std::error::Error for TooLong {}
 
 /// What answers: the AI, or a stand-in in tests.
 pub trait Ask {
+    /// One answer to `prompt`; `activity` hears its steps, `draft` its words as they come.
     async fn ask(
         &mut self,
         prompt: &str,
@@ -253,6 +259,7 @@ pub trait Ask {
 }
 
 impl Ask for Brain {
+    /// The real AI, with its steps and draft followed.
     async fn ask(
         &mut self,
         prompt: &str,
@@ -271,6 +278,7 @@ pub struct Out<'a> {
     pub cards: &'a UnboundedSender<Value>,
 }
 
+/// Asks once within `ASK_TIMEOUT`, and strips any `spawn` or `stop` the AI wrote itself.
 async fn ask_in_time(brain: &mut impl Ask, prompt: &str, out: &Out<'_>) -> anyhow::Result<Answer> {
     let mut answer = tokio::time::timeout(ASK_TIMEOUT, brain.ask(prompt, out.activity, out.draft))
         .await
@@ -285,10 +293,8 @@ async fn ask_in_time(brain: &mut impl Ask, prompt: &str, out: &Out<'_>) -> anyho
     Ok(answer)
 }
 
-/// Asks the AI and carries out each step it takes (tools here, desktop actions through `desk`), handing it
-/// what they found or did, until it answers the user. The answer's own actions run first too, unless they
-/// wait for the island to close: once they all worked it is `checked`, and only a failure goes back to
-/// the AI. `activity` hears each step as it happens (its own web searches too); empty means thinking.
+/// Asks the AI and runs each step until it answers; the answer's own actions run too, bar those for after the island
+/// closes (`checked` once all worked; a failure goes back). `activity` hears each step; empty means thinking.
 pub async fn think(
     brain: &mut impl Ask,
     prompt: &str,

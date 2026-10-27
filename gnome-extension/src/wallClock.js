@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 // The time of day as GNOME's own clock keeps it: each minute, on waking from suspend, and when the time
 // zone or the 12/24-hour setting changes. One clock for the whole island, made while anything watches it.

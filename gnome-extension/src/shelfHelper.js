@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 // Drives `isle-shelf`, the GTK window over the Files tab that does drag and drop
 // (shell actors cannot); started as a drag begins, shown once the island covers it.
@@ -77,6 +78,7 @@ function dragCarriesFiles() {
     return types.some(type => FILE_TYPES.includes(type)) && !types.some(type => NOT_FILES.test(type));
 }
 
+/** Whether `window` is the helper's own, by title or WM_CLASS. */
 function isHelperWindow(window) {
     return [window.get_title(), window.get_wm_class_instance(), window.get_wm_class()?.toLowerCase()]
         .some(name => WINDOW_NAMES.includes(name));
@@ -92,6 +94,7 @@ function logical({x, y, width, height}, scale) {
 // Signals: `drag-near`, `drag-over` (over the shelf or not), `drag-files` (the URIs over it), `drag-away` (went elsewhere),
 // `drag-end` (a drag in or out ended; whether it ended over the shelf), `available-changed`.
 export class ShelfHelper extends Signals.EventEmitter {
+    /** Looks for the helper, watches drags, and catches its window as it maps. */
     constructor(island, page) {
         super();
         this._island = island;
@@ -276,9 +279,8 @@ export class ShelfHelper extends Signals.EventEmitter {
             this._proxy.ShowOverRemote(x, y, width, height, ax, ay, awidth, aheight, shown);
     }
 
-    /** Where the window goes ({rect, area}, the tab's area inside it), once the island's shape covers both; else null.
-     * It covers the whole island, so a file lands wherever it is let go; it stays put as one comes in (the helper
-     * lets the pointer through outside the tab until then). An older helper covers the island only meanwhile. */
+    /** Where the window goes ({rect, area}: the tab inside it) once the island's shape covers both, else null.
+     * The whole island, so a drop lands anywhere; an older helper covers it only while a file comes in. */
     _wantedRect() {
         const page = this._page;
         const area = page.helperArea;
@@ -320,6 +322,7 @@ export class ShelfHelper extends Signals.EventEmitter {
         this._checkScale();
     }
 
+    /** Lets go of the helper's window once it is gone. */
     _forgetWindow() {
         this._windowIds?.forEach(id => this._window.disconnect(id));
         this._windowIds = null;
@@ -380,6 +383,7 @@ export class ShelfHelper extends Signals.EventEmitter {
         });
     }
 
+    /** Takes the window down and gives the tab its own tiles back. */
     _hide() {
         this._resend = false;
         if (!this._shownRect)
@@ -389,6 +393,7 @@ export class ShelfHelper extends Signals.EventEmitter {
         this._proxy?.HideRemote(() => {});
     }
 
+    /** Makes the proxy only if the helper is installed (its bus name can be activated). */
     _checkAvailable() {
         Gio.DBus.session.call(
             'org.freedesktop.DBus', '/org/freedesktop/DBus', 'org.freedesktop.DBus',
@@ -425,6 +430,7 @@ export class ShelfHelper extends Signals.EventEmitter {
             });
     }
 
+    /** The helper started or quit; too many quits while shown and it is given up. */
     _onOwnerChanged(proxy) {
         if (proxy.g_name_owner) {
             // Started again (after a crash, or quitting as the drag began): it must hear of the drag too.
@@ -462,8 +468,8 @@ export class ShelfHelper extends Signals.EventEmitter {
         /** Whether the drag under way carries files; null until it is known. */
         this._dragFiles = null;
         this._dndPosition = this._dnd.connect('dnd-position-change', (_dnd, x, y) => {
-            // Not for a file carried out of the shelf itself.
-            if (this._dragging || !this._proxy)
+            // Not for a file carried out of the shelf itself, nor with the Shelf left out (a drag already near ends as it was).
+            if (this._dragging || !this._proxy || (this._page.hidden && !this._dragNear))
                 return;
             // Only files (or links): a browser tab or text moved about near the island is left alone.
             this._dragFiles ??= dragCarriesFiles();
@@ -509,6 +515,7 @@ export class ShelfHelper extends Signals.EventEmitter {
         return Boolean(rect) && x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height;
     }
 
+    /** Emits `drag-over` when the drag crosses the window's edge. */
     _setDragOver(over) {
         if (over === this._dragOver)
             return;
@@ -531,6 +538,7 @@ export class ShelfHelper extends Signals.EventEmitter {
         this._proxy?.SetDroppingRemote(dropping, () => {});
     }
 
+    /** Disconnects everything and hides the window. */
     destroy() {
         // Tell no one about changes made while tearing down.
         this.disconnectAll();

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 //! Now-playing information and playback control for whichever MPRIS player
 //! (Spotify, browsers, mpv, ...) is currently active, plus its lyrics.
@@ -18,6 +19,7 @@ pub use self::lyrics::Lyrics;
 pub use self::mpris::watch;
 use self::mpris::{PlayerProxy, bounded};
 
+/// What the active player is playing, as the extension reads it.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct NowPlaying {
     /// False when no player is running; every other field is then empty.
@@ -50,8 +52,7 @@ const SAME_POSITION_MS: f64 = 250.0;
 
 impl NowPlaying {
     /// Whether `next` says nothing new: the same song and state, at the position this one predicts.
-    /// Players send their properties again often (volume, shuffle, a browser's metadata), each time
-    /// with a fresh sample of the position.
+    /// Players resend their properties often (volume, shuffle, metadata), each with a fresh position.
     pub fn continues_as(&self, next: &NowPlaying) -> bool {
         let without_time = |n: &NowPlaying| NowPlaying {
             position_us: 0,
@@ -92,6 +93,7 @@ pub enum Wish {
     Lyrics(bool),
 }
 
+/// The Media1 D-Bus object: the watcher fills it, the extension reads and controls through it.
 #[derive(Default)]
 pub struct MediaService {
     now_playing: NowPlaying,
@@ -127,6 +129,7 @@ impl MediaService {
 
 #[interface(name = "io.github.zickrian.isle.Media1")]
 impl MediaService {
+    /// Toggles play and pause.
     fn play_pause(&self) -> fdo::Result<()> {
         self.send(
             "PlayPause",
@@ -134,10 +137,12 @@ impl MediaService {
         )
     }
 
+    /// Skips to the next track.
     fn next(&self) -> fdo::Result<()> {
         self.send("Next", |player, _| async move { player.next().await })
     }
 
+    /// Back to the previous track.
     fn previous(&self) -> fdo::Result<()> {
         self.send(
             "Previous",
@@ -203,6 +208,7 @@ impl MediaService {
 }
 
 impl MediaService {
+    /// Passes a wish on to the watcher; fails before it runs.
     fn wish(&self, wish: Wish) -> fdo::Result<()> {
         self.wishes
             .as_ref()

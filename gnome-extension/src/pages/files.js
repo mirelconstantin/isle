@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 // The shelf's Files tab. The `isle-shelf` helper draws it over this view for drag and
 // drop; both look the same tile for tile, so the hand-over cannot be seen.
@@ -37,8 +38,10 @@ const ZONE_GLOW = [[0.43, 0.48, 1], [0.54, 0.36, 1]];
 const ZONE_GLOW_ALPHA = [0.45, 0.12];
 const FILES_TYPE = 'x-special/gnome-copied-files';
 
+/** The tiles and drop zone St draws itself, seen whenever the helper window isn't over them. */
 export const FilesView = GObject.registerClass(
 class FilesView extends St.Widget {
+    /** `thumbnails` loads the previews and keeps them while the files stay. */
     _init(daemon, thumbnails) {
         super._init({
             style_class: 'isle-shelf-files',
@@ -131,6 +134,7 @@ class FilesView extends St.Widget {
         this._updateEmptyText();
     }
 
+    /** The files on their way can't all land: the zone stays unlit, its outline red. */
     set refused(refused) {
         if (refused === this._refused)
             return;
@@ -151,6 +155,7 @@ class FilesView extends St.Widget {
         this._zone.queue_repaint();
     }
 
+    /** The zone's fill, its rising light and, unless the helper draws them, its dashes. */
     _paintZone(area) {
         const cr = area.get_context();
         const [width, height] = area.get_surface_size();
@@ -184,6 +189,7 @@ class FilesView extends St.Widget {
         cr.$dispose();
     }
 
+    /** Redraws from isled's shelf list. */
     update() {
         const items = this._daemon.state.shelf ?? [];
         // Not while isled is away (no list), or every preview would go.
@@ -243,6 +249,7 @@ class FilesView extends St.Widget {
 
     // Tiles
 
+    /** One file: its preview, a × to take it off, and its name; the thumbnail comes in later. */
     _tile(item) {
         const preview = new St.Bin({style_class: 'isle-shelf-preview', width: px(PREVIEW_SIZE), height: px(PREVIEW_SIZE)});
         // A plain file icon until the file's own one is known (or for good,
@@ -297,6 +304,7 @@ class FilesView extends St.Widget {
         return frame;
     }
 
+    /** The frame over the file's name, as one button. */
     _tileBox(frame, name) {
         const box = new St.BoxLayout({...VERTICAL, style_class: 'isle-shelf-tile-box'});
         box.add_child(frame);

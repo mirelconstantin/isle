@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 zickrian
 # Removes everything install.sh and isle-setup-voice put in place. Your shelf, clipboard history,
 # tasks and timer settings in ~/.local/share/isle are kept; delete that folder to remove them.
 set -uo pipefail

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 //! The user's own to-dos, events and reminders, summed up for the AI so it can answer
 //! "what do I have today?".

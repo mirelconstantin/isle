@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 //! Wall-clock time and waiting for wall-clock deadlines.
 
@@ -62,6 +63,7 @@ pub fn next_midnight() -> Option<i64> {
     local_midnight(Local::now().date_naive().succ_opt()?)
 }
 
+/// Local midnight starting `date`, in milliseconds since the Unix epoch.
 fn local_midnight(date: NaiveDate) -> Option<i64> {
     // `earliest` resolves times made ambiguous by daylight saving changes.
     let midnight = Local

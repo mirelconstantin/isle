@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 use isle_core::shelf::{CAPACITY, Shelf, ShelfItem};
 use zbus::object_server::SignalEmitter;
@@ -8,12 +9,14 @@ use crate::clock::now_ms;
 use crate::store::{Store, data_dir};
 use crate::uri;
 
+/// The file shelf on the bus, saved to disk after every change.
 pub struct ShelfService {
     shelf: Shelf,
     store: Store<Shelf>,
 }
 
 impl ShelfService {
+    /// Loads the saved shelf, dropping files gone since and copies no longer listed.
     pub fn load() -> Self {
         let mut store = Store::new("shelf");
         let mut shelf: Shelf = store.load();
@@ -27,6 +30,7 @@ impl ShelfService {
         Self { shelf, store }
     }
 
+    /// Saves the shelf and tells the extension.
     async fn changed(&self, emitter: &SignalEmitter<'_>) -> zbus::Result<()> {
         self.store.save(&self.shelf);
         self.items_changed(emitter).await
@@ -83,6 +87,7 @@ impl ShelfService {
         }
     }
 
+    /// Takes one file off the shelf, deleting it only if it is the shelf's own copy.
     async fn remove(
         &mut self,
         uri: &str,
@@ -95,6 +100,7 @@ impl ShelfService {
         Ok(())
     }
 
+    /// Empties the shelf, deleting the shelf's own copies.
     async fn clear(
         &mut self,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
@@ -164,6 +170,7 @@ fn owned_dir() -> std::path::PathBuf {
     data_dir().join("shelf")
 }
 
+/// Whether a `file://` URI still points at something on disk.
 fn file_exists(uri: &str) -> bool {
     uri::to_path(uri).is_some_and(|path| path.exists())
 }

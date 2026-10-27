@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 // Reminders, the right half of the Focus page (focus.js), in dark mode: an orange title and
 // count, a ring and a hairline per reminder, and a last row to add one; a ticked one is struck, then goes.
@@ -7,7 +8,7 @@ import Clutter from 'gi://Clutter';
 import GObject from 'gi://GObject';
 import St from 'gi://St';
 
-import {VERTICAL} from '../compat.js';
+import {VERTICAL, onUiScale} from '../compat.js';
 import {iconButton, label, wrapLines} from '../widgets.js';
 import {Page} from './page.js';
 
@@ -51,14 +52,17 @@ export function onHover(actor, callback) {
  * height, and a box takes a wrapped title's minimum as one line. */
 const ReminderRow = GObject.registerClass(
 class ReminderRow extends St.BoxLayout {
+    /** Natural height as the minimum too. */
     vfunc_get_preferred_height(forWidth) {
         const [, natural] = super.vfunc_get_preferred_height(forWidth);
         return [natural, natural];
     }
 });
 
+// The reminder list, kept in isled's todo store.
 export const TasksPage = GObject.registerClass(
 class TasksPage extends Page {
+    /** `height` is the expanded island's page height. */
     _init(daemon, {height}) {
         super._init(daemon, {
             style_class: 'isle-page isle-reminders',
@@ -100,19 +104,24 @@ class TasksPage extends Page {
         this._update();
     }
 
+    /** Open and done alike, as isled has them. */
     _tasks() {
         return this.daemon.state.tasks ?? [];
     }
 
     // Building
 
+    /** "Reminders", the count of open ones, and +. */
     _buildHeader() {
         const header = new St.BoxLayout({style_class: 'isle-reminders-header'});
         header.add_child(label('Reminders', 'isle-reminders-title', {x_expand: true}));
         this._count = label('', 'isle-reminders-count');
         header.add_child(this._count);
-        header.add_child(iconButton('isle-plus-symbolic', 'isle-button-flat isle-reminders-add',
-            () => this._focusNew(), {size: 12, accessibleName: 'New reminder'}));
+        const add = iconButton('isle-plus-symbolic', 'isle-button-flat isle-reminders-add',
+            () => this._focusNew(), {size: 12, accessibleName: 'New reminder'});
+        // Its plus on the page's right edge; the padding hangs past it.
+        onUiScale(add, scale => (add.translation_x = 5 * scale));
+        header.add_child(add);
         return header;
     }
 
@@ -146,12 +155,14 @@ class TasksPage extends Page {
         return row;
     }
 
+    /** The + button: into the new row's field, scrolled into view. */
     _focusNew() {
         this.emit('request-keyboard', true);
         this._entry.grab_key_focus();
         this._revealNew();
     }
 
+    /** Scrolls to the bottom once the list has laid out. */
     _revealNew() {
         this.later('reveal-new', 40, () => {
             const adjustment = this._scroll.vadjustment;
@@ -159,6 +170,7 @@ class TasksPage extends Page {
         });
     }
 
+    /** Sends the typed title to isled. */
     async _add() {
         const text = this._entry.text.trim();
         if (!text)
@@ -168,6 +180,7 @@ class TasksPage extends Page {
         this._revealNew();
     }
 
+    /** Clears the field and gives the keyboard back if it had it. */
     _stopAdding() {
         this._entry.text = '';
         if (this._entry.clutter_text.has_key_focus())
@@ -176,6 +189,7 @@ class TasksPage extends Page {
 
     // Showing
 
+    /** Brings the rows in line with isled's list, unless a rename or a tick is under way. */
     _update() {
         if (this._renaming !== null || this._leaving.size > 0)
             return;
@@ -253,6 +267,7 @@ class TasksPage extends Page {
         });
     }
 
+    /** One reminder: tick ring, title (click to rename), hover × and hairline. */
     _row(task) {
         // Never y_expand: its column fills it, and once a child changes (a rename) the row would ask to
         // expand too and take all the list's room.
@@ -379,6 +394,7 @@ class TasksPage extends Page {
 
     // Renaming
 
+    /** Swaps the title for a field; Enter or a click away saves, Esc cancels. */
     _startRenaming(titleBox, title, task) {
         const entry = new St.Entry({style_class: 'isle-reminder-field', text: task.title, x_expand: true, can_focus: true});
         titleBox.replace_child(title, entry);
@@ -424,6 +440,7 @@ class TasksPage extends Page {
             this.emit('request-keyboard', false);
     }
 
+    /** Ends whatever was under way, so the list is settled next time. */
     onDeactivate() {
         this._stopAdding();
         // Nothing in the middle of anything: the list stays as it is, with no rebuild as the page goes.

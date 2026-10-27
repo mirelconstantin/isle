@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 //! Speech to text with whisper.cpp: Silero finds where someone speaks, Whisper writes it down in
 //! the language it sounds most like among those allowed, and phrases made up from noise are dropped.
@@ -53,6 +54,7 @@ pub fn allowed(language: &str) -> Vec<&str> {
         .collect()
 }
 
+/// The language a detected code counts as, per [`ALIASES`].
 fn alias(code: &str) -> &str {
     ALIASES
         .iter()
@@ -80,9 +82,8 @@ pub fn likeliest<'a>(allowed: &[&'a str], probabilities: &[(&str, f32)]) -> Opti
     best.map(|(code, _)| code)
 }
 
-/// How much of Whisper's 30-second window telling the language encodes, for this many samples:
-/// the speech and a second more, far quicker on a processor than the whole window. (Writing the
-/// words down needs the whole window: shorter, Whisper repeats itself on a short clip.)
+/// Encoder frames for language detection: the speech plus a second, far quicker than the 30 s
+/// window. Transcribing still needs the whole window, or Whisper repeats itself on a short clip.
 pub fn detection_frames(samples: usize) -> i32 {
     // The encoder takes 50 frames a second.
     (samples / 320 + 64).min(1500) as i32
@@ -104,6 +105,7 @@ pub fn speech_only(samples: &[f32], stretches: &[(f32, f32)]) -> Vec<f32> {
     speech
 }
 
+/// A loaded Whisper model, with Silero when its file is there.
 pub struct Model {
     state: WhisperState,
     vad: Option<WhisperVadContext>,
@@ -229,6 +231,7 @@ impl Model {
     }
 }
 
+/// Returning false stops the run once the spectrogram is ready, before the encoder.
 unsafe extern "C" fn stop_before_encoding(
     _: *mut sys::whisper_context,
     _: *mut sys::whisper_state,

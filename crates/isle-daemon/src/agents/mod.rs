@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 //! AI agent alerts: Claude Code and Codex, once the user turns them on, run `isled --agent-hook` when
 //! they need the user or finish, and the island shows it. The hooks live in each AI's own config.
@@ -58,6 +59,7 @@ pub enum Ai {
 impl Ai {
     const ALL: [Ai; 2] = [Ai::Claude, Ai::Codex];
 
+    /// As Settings and the hooks name it.
     fn id(self) -> &'static str {
         match self {
             Ai::Claude => "claude",
@@ -65,10 +67,12 @@ impl Ai {
         }
     }
 
+    /// Settings' or a hook's name back to the AI; `None` for one Isle has no hooks for.
     fn from_id(id: &str) -> Option<Ai> {
         Self::ALL.into_iter().find(|ai| ai.id() == id)
     }
 
+    /// What the island calls it.
     fn name(self) -> &'static str {
         match self {
             Ai::Claude => "Claude Code",
@@ -76,6 +80,7 @@ impl Ai {
         }
     }
 
+    /// The config file its hooks go in.
     fn config(self) -> PathBuf {
         match self {
             Ai::Claude => claude::settings_path(),
@@ -93,6 +98,7 @@ impl Ai {
         }
     }
 
+    /// Whether its program is installed.
     fn found(self) -> bool {
         match self {
             Ai::Claude => Provider::Claude.program().is_some(),
@@ -100,6 +106,7 @@ impl Ai {
         }
     }
 
+    /// Whether Isle's hook is in its config now.
     fn hooked(self) -> bool {
         match self {
             Ai::Claude => claude::hooked(&self.config()),
@@ -107,6 +114,7 @@ impl Ai {
         }
     }
 
+    /// Puts Isle's hook in its config, pointing at this isled.
     fn hook(self) -> anyhow::Result<()> {
         let isled = isled_path()?;
         let isled = isled
@@ -137,12 +145,14 @@ fn isled_path() -> anyhow::Result<PathBuf> {
     Ok(std::fs::canonicalize(&exe).unwrap_or(exe))
 }
 
+/// One AI as Settings shows it: installed, and hooked.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
 struct Status {
     found: bool,
     hooked: bool,
 }
 
+/// Both AIs' status, for the `Agents` property.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
 struct Agents {
     claude: Status,
@@ -150,6 +160,7 @@ struct Agents {
 }
 
 impl Agents {
+    /// Read from disk each time, so a hook added or removed by hand shows.
     fn read() -> Self {
         let status = |ai: Ai| Status {
             found: ai.found(),
@@ -180,7 +191,8 @@ pub struct Event {
 impl Event {
     /// Checked, on one line each and cut to size: the project is the folder's name unless given.
     pub fn checked(mut self) -> Result<Self, String> {
-        if Ai::from_id(&self.provider).is_none() {
+        // Grok has no hooks of its own: it runs Claude's, and the hook says so (see hook.rs `ai_of`).
+        if Ai::from_id(&self.provider).is_none() && self.provider != "grok" {
             return Err(format!("unknown provider `{}`", cut(&self.provider, 40)));
         }
         if !KINDS.contains(&self.kind.as_str()) {
@@ -246,6 +258,7 @@ pub struct Request {
 }
 
 impl Request {
+    /// Checked like an `Event`, with the tool and its input cut to size.
     fn checked(mut self) -> Result<Self, String> {
         let event = Event {
             provider: self.provider.clone(),
@@ -274,6 +287,7 @@ struct Limiter {
 }
 
 impl Limiter {
+    /// False for an event too soon after the last of its kind.
     fn allow(&mut self, event: &Event, now: Instant) -> bool {
         let key = (
             event.provider.clone(),
@@ -297,6 +311,7 @@ impl Limiter {
 /// Permissions waiting for the user, by id, and where each answer goes.
 type Waiting = std::sync::Mutex<HashMap<String, tokio::sync::oneshot::Sender<String>>>;
 
+/// Agent alerts and permission asks, between the hooks and the island.
 #[derive(Default)]
 pub struct AgentsService {
     limiter: std::sync::Mutex<Limiter>,
@@ -353,9 +368,8 @@ impl AgentsService {
         Ok(Self::event(&emitter, &json).await?)
     }
 
-    /// From `isled --agent-hook` as an AI asks a permission: JSON `{provider, project, cwd, session, tool,
-    /// input, always}`. Shows it on the island and waits for the user: "allow", "always" or "deny"; "" when
-    /// the island will not answer (the AI then asks in its own terminal).
+    /// From `isled --agent-hook`: a `Request` as JSON. Waits for the user's "allow", "always" or "deny";
+    /// "" when the island will not answer, and the AI then asks in its own terminal.
     async fn decide(
         &self,
         json: &str,
@@ -437,6 +451,7 @@ impl AgentsService {
         serde_json::to_string(&Agents::read()).unwrap_or_default()
     }
 
+    /// An AI needs the user or finished: the checked event as JSON.
     #[zbus(signal)]
     async fn event(emitter: &SignalEmitter<'_>, json: &str) -> zbus::Result<()>;
 }
@@ -489,10 +504,8 @@ async fn watch_configs(
         .map(Ai::config)
         .chain([codex::hooks_path()])
         .collect();
-    // Where their programs land when installed (npm, nvm, volta, bun, pnpm, the installers), as the
-    // assistant looks for them: a new one is found at once. A new Node under nvm is watched in turn.
-    // A folder not there yet (a new user's ~/.local/bin, nvm before its first Node): its nearest parent
-    // that is, for the next folder down to appear, and then all is watched again.
+    // Also where their programs land when installed (npm, nvm, volta, bun…), so a new one is found at once.
+    // A folder not there yet is watched through its nearest parent until it appears.
     let home = dirs::home_dir().unwrap_or_default();
     let mut ahead: Vec<(inotify::WatchDescriptor, std::ffi::OsString)> = Vec::new();
     let mut watch_or_ahead = |dir: &Path, mask: WatchMask| {

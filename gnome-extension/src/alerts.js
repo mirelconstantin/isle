@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 // Turns events into alerts for the peek view (see peek.js for the format).
 
@@ -14,6 +15,8 @@ const REMINDER_DURATION = 8000;
 /** As long as GNOME's own banner; a passing one (a screenshot taken) less. The pointer on it holds it. */
 const NOTIFICATION_DURATION = 4000;
 const TRANSIENT_NOTIFICATION_DURATION = 2500;
+/** As many of a notification's buttons as GNOME's banner shows. */
+const MAX_NOTIFICATION_BUTTONS = 3;
 /** The longest an answer stays to be read, as the open island gives it (see VOICE_READ_MS in controller.js). */
 const ANSWER_MAX_DURATION = 8000;
 /** A critical notification stays this long once someone is there to see it. */
@@ -24,6 +27,7 @@ function batteryIcon(percent) {
     return percent <= 20 ? 'isle-battery-low-symbolic' : 'isle-battery-symbolic';
 }
 
+/** "42%", rounded. */
 function percentText(value) {
     return `${Math.round(value)}%`;
 }
@@ -80,6 +84,7 @@ export function osd(gicon, text, level, maxLevel) {
     };
 }
 
+/** Caps Lock turned on or off; it rises only when on. */
 export function capsLock(on) {
     return {
         key: 'keyboard',
@@ -168,6 +173,7 @@ export function system(event) {
     }
 }
 
+/** A pomodoro phase ended; when the next one waits to be started, a button starts it. */
 export function pomodoroFinished(finished, next, state, daemon) {
     const waiting = !state?.running;
     const minutes = state ? Math.round(state.duration_ms / 60000) : 0;
@@ -197,6 +203,7 @@ export function pomodoroFinished(finished, next, state, daemon) {
     };
 }
 
+/** A new song: its cover with the player's icon as a badge. */
 export function track(nowPlaying) {
     return {
         key: 'track',
@@ -266,20 +273,27 @@ export function notification(item, urgent, {onShown, onWithdrawn}, shared = fals
     // On one line, as the body.
     const title = (shared ? item.source?.title || 'New notification' : item.title || item.source?.title || '')
         .replace(/\s+/g, ' ').trim();
+    const buttons = shared ? [] : (item.actions ?? []).slice(0, MAX_NOTIFICATION_BUTTONS);
+    const press = button => {
+        if (!withdrawn.has(item))
+            button.activate();
+    };
     const alert = {
         // Its own key: one arriving behind another waits its turn; the same one updated replaces itself.
         key,
         kind: 'notification',
+        // Put away with its ×, buttons or not, as GNOME's banner.
+        closable: true,
         // A critical one waits for someone to be there, like GNOME's, which stays until handled.
         sticky: urgent,
-        // Its first button ("Mark as read"), as GNOME's banner had it.
-        action: !shared && item.actions?.length ? {
-            label: item.actions[0].label,
-            callback: () => {
-                if (!withdrawn.has(item))
-                    item.actions[0]?.activate();
-            },
-        } : undefined,
+        // One button ("Mark as read") beside the words; two or three ("Decline", "Accept") under them, all of
+        // them, as GNOME's banner has them.
+        action: buttons.length === 1 ? {label: buttons[0].label, callback: () => press(buttons[0])} : undefined,
+        actions: buttons.length > 1 ? buttons.map((button, index) => ({
+            label: button.label,
+            primary: index === buttons.length - 1,
+            callback: () => press(button),
+        })) : undefined,
         onShown: () => {
             if (!withdrawn.has(item))
                 onShown();
@@ -306,8 +320,9 @@ export function notification(item, urgent, {onShown, onWithdrawn}, shared = fals
             if (withdrawn.has(item) || (!alert.shown && (item.acknowledged || (!urgent && !bannersOn(item)))))
                 return null;
             const redone = notification(item, urgent, {onShown, onWithdrawn}, sharedNow);
+            const labels = a => [a.action, ...a.actions ?? []].map(button => button?.label).join();
             if (redone.title === alert.title && redone.subtitle === alert.subtitle &&
-                redone.action?.label === alert.action?.label && redone.gicon === alert.gicon)
+                labels(redone) === labels(alert) && redone.gicon === alert.gicon)
                 return alert;
             redone.shown = alert.shown;
             return redone;
@@ -333,13 +348,18 @@ export function usage(provider, window, percent, resetsAt, critical) {
     const name = provider.toLowerCase();
     return {
         key: `usage:${provider}:${window}`,
-        icon: name.includes('claude') ? 'isle-claude' : name.includes('gpt') || name.includes('codex') ? 'isle-openai' : 'isle-gauge',
+        icon: name.includes('claude') ? 'isle-claude'
+            : name.includes('grok') ? 'isle-grok'
+            : name.includes('gpt') || name.includes('codex') ? 'isle-openai' : 'isle-gauge',
         ring: Math.min(1, percent / 100),
         title: provider,
         subtitle: resetsAt > 0 ? `${limitName(window)} · resets ${when}` : limitName(window),
         value: percentText(percent),
         // In the plan's own colour, as on the Usage page; red once nearly used up.
-        tone: Math.round(percent) >= critical ? 'bad' : name.includes('claude') ? 'claude' : name.includes('gpt') || name.includes('codex') ? 'codex' : 'neutral',
+        tone: Math.round(percent) >= critical ? 'bad'
+            : name.includes('claude') ? 'claude'
+            : name.includes('grok') ? 'grok'
+            : name.includes('gpt') || name.includes('codex') ? 'codex' : 'neutral',
         duration: REMINDER_DURATION,
         page: 'usage',
     };
@@ -410,8 +430,11 @@ export function meeting(event, link, join) {
     return alert;
 }
 
-const AGENT_NAMES = {claude: 'Claude', codex: 'Codex'};
-const AGENT_APPS = {claude: 'Claude Code', codex: 'Codex'};
+const AGENT_NAMES = {claude: 'Claude', codex: 'Codex', grok: 'Grok'};
+const AGENT_APPS = {claude: 'Claude Code', codex: 'Codex', grok: 'Grok'};
+/** The agent's icon and accent colour; Claude's for anything unknown. */
+const agentIcon = provider => provider === 'codex' ? 'isle-openai' : provider === 'grok' ? 'isle-grok' : 'isle-claude';
+const agentTone = provider => provider === 'codex' ? 'codex' : provider === 'grok' ? 'grok' : 'claude';
 
 /** An AI agent needs the user, or is done ({provider, kind, project, message}); `show` brings its window up. */
 export function agent(event, show) {
@@ -424,11 +447,11 @@ export function agent(event, show) {
     return {
         // One per session: a newer word from the same one replaces it.
         key: `agent:${event.provider}:${event.session || event.project}`,
-        icon: event.provider === 'codex' ? 'isle-openai' : 'isle-claude',
+        icon: agentIcon(event.provider),
         motion: waiting ? 'ring' : 'bounce',
         title,
         subtitle: [event.project, detail].filter(Boolean).join(' · '),
-        tone: event.provider === 'codex' ? 'codex' : 'claude',
+        tone: agentTone(event.provider),
         duration: waiting ? REMINDER_DURATION + 4000 : REMINDER_DURATION,
         // It waits on the user: it stays until they are there to see it.
         sticky: waiting,
@@ -440,9 +463,8 @@ export function agent(event, show) {
 const ASKING_GLOW = [[1, 0.62, 0.04], [1, 0.42, 0.25], [1, 0.8, 0.3]];
 const DONE_GLOW = [[0.19, 0.82, 0.35], [0.35, 0.88, 0.75], [0.7, 0.94, 0.35]];
 
-/** What a tool call is about, in a line: a command as it is, else the tool and what it works on. */
-// What it asks to do, on one line: a shell command as it is, else the tool and what it touches
-// (isled sends that as a line; see agents/hook.rs `request`).
+/** What a tool call asks to do, on one line: a shell command as it is, else the tool and what it touches
+ * (isled sends that as a line; see agents/hook.rs `request`). */
 function toolLine(tool, input) {
     const line = String(typeof input === 'string' ? input
         : input?.command ?? input?.file_path ?? input?.path ?? input?.url ?? input?.pattern ?? '').split('\n')[0];
@@ -451,10 +473,8 @@ function toolLine(tool, input) {
     return [tool, line].filter(Boolean).join(' ');
 }
 
-/**
- * An AI agent asks to run something ({provider, project, tool, input, always}); `answer(choice)` sends
- * allow, deny or always back to it. The assistant shows it, as the one asking on its behalf.
- */
+/** An AI agent asks to run something ({provider, project, tool, input, always}), shown by the assistant;
+ * `answer(choice)` sends allow, deny or always back. */
 export function agentAsks(request, look, answer) {
     const actions = [
         {label: 'Deny', answer: 'deny', callback: () => answer('deny')},
@@ -500,8 +520,14 @@ export function agentDone(event, look, show) {
 
 /** The first sentence of `text`, cut to a line's worth. */
 function firstSentence(text) {
+    // The words first (`{"say":"…"}` is that sentence), then the first line that says something: not a
+    // heading alone ("## Summary"), code or a rule, unless that is all there is.
+    const words = Format.spoken(text ?? '');
+    const linesOf = part => part.split('\n').map(line => line.trim()).filter(Boolean);
+    const line = linesOf(words.replace(/```[\s\S]*?(```|$)/g, '')).find(each => !/^(#{1,6}\s|([-*_]\s*){3,}$)/.test(each)) ??
+        linesOf(words)[0] ?? '';
     // Markdown's marks only, not the characters of names (`user_id` keeps its underscore).
-    const first = Format.answerPlain((text ?? '').trim().split(/(?<=[.!?])\s|\n/)[0] ?? '')
+    const first = Format.answerPlain(line.split(/(?<=[.!?])\s/)[0])
         .replace(/^[#>\s]+/, '')
         .replace(/(^|[^\w])_([^_]+)_(?=[^\w]|$)/g, '$1$2')
         .replace(/(^|[^\w*])\*([^*]+)\*(?=[^\w*]|$)/g, '$1$2')
@@ -545,12 +571,28 @@ export function agentConnected(provider, look, settings) {
     };
 }
 
+/** The model picked for the assistant isn't on `provider`'s plan now (it lapsed, say): `used` answers instead. */
+export function modelSwitched(provider, plan, picked, used) {
+    const name = {claude: 'Claude', codex: 'ChatGPT', grok: 'Grok', agy: 'Antigravity'}[provider] ?? 'Your AI';
+    return {
+        key: `model-switched:${provider}`,
+        icon: {claude: 'isle-claude', codex: 'isle-openai', grok: 'isle-grok'}[provider] ?? 'isle-sparkle-symbolic',
+        title: plan ? `${name} ${plan} doesn’t include ${picked}` : `${picked} isn’t available`,
+        // A long model name ("Claude Opus 4.6 (Thinking)") wraps rather than being cut.
+        titleLines: 2,
+        // The pick comes back by itself once the plan allows it again.
+        subtitle: `Using ${used} for now`,
+        tone: 'neutral',
+        duration: REMINDER_DURATION,
+    };
+}
+
 /** The alerts from `provider` could not be turned on; `reason` is isled's. */
 export function agentRefused(provider, reason) {
     const name = AGENT_NAMES[provider] ?? 'Your AI';
     return {
         key: `agent-refused:${provider}`,
-        icon: provider === 'codex' ? 'isle-openai' : 'isle-claude',
+        icon: agentIcon(provider),
         motion: 'shake',
         title: `Couldn’t turn on ${name} alerts`,
         subtitle: reason,
@@ -559,16 +601,16 @@ export function agentRefused(provider, reason) {
     };
 }
 
-/** A newer Isle is out; `howTo` shows how to update. `packaged`: installed system-wide (.deb, .rpm, AUR). */
-export function update(version, howTo, packaged = false) {
+/** A newer Isle is out; `open` shows Settings' Update. `packaged`: installed system-wide (.deb, .rpm, AUR). */
+export function update(version, open, packaged = false) {
     return {
         key: 'update',
         icon: 'software-update-available-symbolic',
         motion: 'bounce',
         title: `Isle ${version} is out`,
-        subtitle: packaged ? 'Install its new package to update' : 'Run the install command again to update',
+        subtitle: packaged ? 'Update its package to get it' : 'Update in a click; your things stay',
         tone: 'good',
-        action: {label: 'How', callback: howTo},
+        action: {label: 'Update', callback: open},
         duration: REMINDER_DURATION,
     };
 }

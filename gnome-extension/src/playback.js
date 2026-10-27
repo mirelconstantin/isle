@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 // Helpers for the daemon's `NowPlaying` and `Lyrics` state.
 
 import {DesktopAppInfo} from './appInfo.js';
 import {nowMs} from './format.js';
 
+/** Whether a player is up and playing right now. */
 export function isPlaying(nowPlaying) {
     return nowPlaying?.available && nowPlaying.status === 'Playing';
 }
 
+/** Whether a player is up with a titled track, playing or paused. */
 export function hasTrack(nowPlaying) {
     return nowPlaying?.available && Boolean(nowPlaying.title);
 }
@@ -24,6 +27,7 @@ export function positionMs(nowPlaying) {
     return length > 0 ? Math.min(Math.max(position, 0), length) : Math.max(position, 0);
 }
 
+/** The track's length in ms, 0 when unknown. */
 export function lengthMs(nowPlaying) {
     return (nowPlaying?.length_us ?? 0) / 1000;
 }

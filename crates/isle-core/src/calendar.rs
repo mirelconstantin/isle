@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 //! Isle's own calendar events, written in one line ("Dinner 8:00 pm").
 //! Times are local wall-clock times; desktop calendars come from GNOME Shell.
@@ -12,6 +13,7 @@ pub const CAPACITY: usize = 2000;
 /// A title is cut to this many characters.
 const MAX_TITLE_CHARS: usize = 200;
 
+/// One event of Isle's own, as saved and as sent to the extension.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Event {
     pub id: u64,
@@ -24,12 +26,14 @@ pub struct Event {
     pub end: Option<String>,
 }
 
+/// All of Isle's own events, kept sorted, with ids that never repeat.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Calendar {
     events: Vec<Event>,
     next_id: u64,
 }
 
+/// Why an event was not added: a day that does not exist, or nothing left but a time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AddError {
     BadDate,
@@ -62,6 +66,7 @@ impl Calendar {
         Ok(self.next_id)
     }
 
+    /// Deletes an event; returns whether it was there.
     pub fn remove(&mut self, id: u64) -> bool {
         let before = self.events.len();
         self.events.retain(|event| event.id != id);
@@ -81,6 +86,7 @@ impl Calendar {
         self.events.len() != before
     }
 
+    /// Puts events in day and start order, ties by when they were added.
     fn sort(&mut self) {
         // "HH:MM" sorts as text; `None` (all day) sorts first.
         self.events
@@ -97,6 +103,7 @@ struct Day {
 }
 
 impl Day {
+    /// Reads "YYYY-MM-DD" exactly; `None` for a day the month does not have.
     fn parse(text: &str) -> Option<Self> {
         let mut parts = text.split('-');
         let (year, month, day) = (parts.next()?, parts.next()?, parts.next()?);
@@ -134,6 +141,7 @@ impl Day {
 }
 
 impl std::fmt::Display for Day {
+    /// Back to "YYYY-MM-DD", zero-padded.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:04}-{:02}-{:02}", self.year, self.month, self.day)
     }
@@ -304,6 +312,7 @@ fn clock(text: &str, bare_ok: bool) -> Option<u32> {
     (minute < 60).then_some(hour * 60 + minute)
 }
 
+/// Minutes after midnight as "HH:MM".
 fn format_time(minutes: u32) -> String {
     format!("{:02}:{:02}", minutes / 60, minutes % 60)
 }

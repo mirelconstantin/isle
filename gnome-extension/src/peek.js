@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
-// Short-lived alerts the island grows to show. An alert: {key (same key replaces), icon | gicon | art | bot, badge,
-// appIcon, ring, ringIconSize, volume, title, titleLines, subtitle (cutSubtitle in its place when the title is cut), code,
-// tone, value, status, level, action | actions, duration, onActivate, page, priority, transient, motion (the icon's,
-// once; see `playMotion` in widgets.js)}.
+// Short-lived alerts the island grows to show. An alert has a key (same key replaces), an icon, art, ring or bot, a
+// title and subtitle, tone, a value or level, actions, duration and priority; `setAlert` reads the rest.
 
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
@@ -48,12 +47,14 @@ const TONE_COLORS = {
     // The plans' colours on the Usage page (see pages/usage.js).
     claude: [0.85, 0.47, 0.34],
     codex: [0.06, 0.64, 0.5],
+    grok: [0.93, 0.94, 0.96],
     agy: [0.3, 0.55, 1],
     warn: Palette.ORANGE,
     break: Palette.BLUE,
     calendar: Palette.BLUE,
 };
 
+/** An [r, g, b] colour, each 0 to 1, as CSS rgba(). */
 const css = ([r, g, b], alpha = 1) =>
     `rgba(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)}, ${alpha})`;
 
@@ -65,10 +66,12 @@ function badgeStyle(rgb, neutral) {
         `background-gradient-end: ${css(base, bottom)};`;
 }
 
+/** An alert's content inside the island: badge, texts, and the buttons that answer. */
 export const PeekView = GObject.registerClass({
     // The × on its icon (see `showClose`).
     Signals: {'close-requested': {}},
 }, class PeekView extends St.Widget {
+    /** Builds every piece once; each alert only picks which are shown. */
     _init() {
         super._init({style_class: 'isle-peek', layout_manager: new Clutter.BinLayout()});
 
@@ -199,7 +202,7 @@ export const PeekView = GObject.registerClass({
         this._row.style_class = decision ? 'isle-peek-row isle-peek-row-asks' : 'isle-peek-row';
         this._lead.y_align = this._texts.y_align = decision ? Clutter.ActorAlign.START : Clutter.ActorAlign.CENTER;
         // One that asks is answered with its own buttons; the volume and the like pass by themselves.
-        this._closable = !decision && !alert.transient;
+        this._closable = alert.closable ?? (!decision && !alert.transient);
         if (!this._closable)
             this.showClose(false);
         if (alert.bot) {
@@ -276,19 +279,30 @@ export const PeekView = GObject.registerClass({
 
         this._code.text = alert.code ?? '';
         this._code.visible = Boolean(alert.code);
-        this._showActions(alert.actions ?? [], onDone);
+        this._showActions(alert.actions ?? [], onDone, alert.key, fresh);
 
-        this._actionButton?.destroy();
-        this._actionButton = null;
+        // The same alert updating in place with the same button keeps it, under the pointer (see `_showActions`).
+        const actionLabel = alert.action ? `${alert.action.primary ? '*' : ''}${alert.action.label}` : null;
+        const keepButton = Boolean(this._actionButton) && !fresh && alert.key === this._actionKey && actionLabel === this._actionLabel;
+        if (!keepButton) {
+            this._actionButton?.destroy();
+            this._actionButton = null;
+        }
+        this._shownAction = alert.action;
+        this._actionDone = onDone;
+        this._actionKey = alert.key;
+        this._actionLabel = actionLabel;
         this._count = null;
         if (alert.level === undefined || alert.level === null || alert.action)
             this._levelKey = null;
         if (alert.action) {
             // The one thing to do now (Join) in the accent colour, as a default button.
-            this._actionButton = pillButton(alert.action.label, alert.action.primary ? 'isle-pill-small isle-pill-accent' : 'isle-pill-small', () => {
-                alert.action.callback();
-                onDone?.();
-            });
+            if (!keepButton) {
+                this._actionButton = pillButton(alert.action.label, alert.action.primary ? 'isle-pill-small isle-pill-accent' : 'isle-pill-small', () => {
+                    this._shownAction.callback();
+                    this._actionDone?.();
+                });
+            }
             this._setChild(this._accessory, this._actionButton);
         } else if (alert.level !== undefined && alert.level !== null) {
             if (alert.key !== this._levelKey)
@@ -316,24 +330,34 @@ export const PeekView = GObject.registerClass({
         }
     }
 
-    // The answers an alert offers (Deny, Allow, Always…), each {label, primary, answer: allow | deny, callback}:
-    // the callback runs at once; an allow or deny then shows a moment, the assistant hopping or shaking.
-    _showActions(actions, onDone) {
+    // The answers an alert offers, each {label, primary, answer: allow | deny, callback}; an allow or deny shows a moment.
+    // The same alert updating in place (`key`) with the same buttons keeps them, armed and under the pointer.
+    _showActions(actions, onDone, key = null, fresh = true) {
+        const labels = actions.map(action => `${action.primary ? '*' : ''}${action.label}`).join('\n');
+        const kept = !fresh && key !== null && key === this._actionsKey && labels === this._actionLabels && !this._answerTimer &&
+            this._actions.visible;
+        this._shownActions = actions;
+        this._actionsDone = onDone;
+        this._actionsKey = key;
+        this._actionLabels = labels;
+        if (kept)
+            return;
         this._clearAnswer();
         this._actions.destroy_all_children();
         this._actions.visible = actions.length > 0;
         this._answered.visible = false;
         this._actionsShownAt = GLib.get_monotonic_time();
-        for (const action of actions) {
+        actions.forEach((action, i) => {
             const style = action.primary ? 'isle-pill-small isle-peek-action isle-pill-white' : 'isle-pill-small isle-peek-action';
-            this._actions.add_child(pillButton(action.label, style, () => this._answer(action, onDone)));
-        }
+            this._actions.add_child(pillButton(action.label, style, () => this._answer(this._shownActions[i], this._actionsDone)));
+        });
     }
 
+    /** Runs a button's callback, then shows the answer a moment; a press too soon after the buttons appeared is ignored. */
     _answer(action, onDone) {
-        // A click meant for what was there a moment ago never answers what just appeared.
+        // A click meant for what was there a moment ago never presses what just appeared ("Accept").
         const fresh = GLib.get_monotonic_time() - (this._actionsShownAt ?? 0) < ARMED_AFTER_MS * 1000;
-        if (this._answerTimer || (action.answer && fresh))
+        if (this._answerTimer || fresh)
             return;
         // Answered: putting it away after says nothing more (see `onDismissed`).
         if (this._shown)
@@ -361,6 +385,7 @@ export const PeekView = GObject.registerClass({
         });
     }
 
+    /** Stops a shown answer's timer. */
     _clearAnswer() {
         if (this._answerTimer)
             GLib.source_remove(this._answerTimer);
@@ -406,6 +431,7 @@ export const PeekView = GObject.registerClass({
         layout.set_attributes(this._title.clutter_text.get_attributes());
         layout.set_width(width * Pango.SCALE);
         layout.set_wrap(Pango.WrapMode.WORD_CHAR);
+        // Whether `candidate` takes no more than `max` lines.
         const fits = candidate => {
             layout.set_text(candidate, -1);
             return layout.get_line_count() <= max;
@@ -457,6 +483,7 @@ export const PeekView = GObject.registerClass({
         return Math.round(Math.min(px(MAX_WIDTH), Math.max(px(MIN_WIDTH), natural)));
     }
 
+    /** Puts `child` in `bin`; no child hides the bin. */
     _setChild(bin, child) {
         if (bin.child !== child)
             bin.child = child;
@@ -464,6 +491,7 @@ export const PeekView = GObject.registerClass({
         bin.visible = child !== null;
     }
 
+    /** Frees the pieces no alert is showing right now. */
     _onDestroy() {
         this._clearAnswer();
         // Pieces not currently shown are not children and must be freed here.

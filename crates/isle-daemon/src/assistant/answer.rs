@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 //! What every AI answers with, whichever the user picked: a JSON object of what to say, the actions
 //! Isle runs, whether it is done or wants to see what they did first, and whether to listen again.
@@ -20,6 +21,7 @@ pub const SCHEMA: &str = r#"{"type":"object","required":["say","actions"],"prope
 "apps":{"type":"array","items":{"type":"string"}},
 "why":{"type":"string"},"detail":{"type":"string"},"root":{"type":"boolean"},"mode":{"type":"string"}}}}}}"#;
 
+/// One parsed answer, plus what isled noted while getting it.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Answer {
     pub say: String,
@@ -62,6 +64,7 @@ impl Answer {
     }
 }
 
+/// Serde default for `done`: an answer that leaves it out is finished.
 fn yes() -> bool {
     true
 }

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 //! `isled`: the Isle background service, on the session bus as `io.github.zickrian.isle.Daemon`.
 //! See `docs/dbus-api.md` for the interfaces.
@@ -59,6 +60,7 @@ Usage: isled [--version | --doctor | --report | --unhook-all | --help]
 
 Claude Code and Codex run `isled --agent-hook claude|codex` themselves, once their alerts are on.";
 
+/// Runs the service, or one of the command-line tools in `HELP`.
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args_os()

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 //! Clipboard history over D-Bus: the shell reports copies, isled keeps the list and images.
 //! Images are stored once per hash in `~/.local/share/isle/clips`, each with a thumbnail.
@@ -28,6 +29,7 @@ const MAX_IMAGE_BYTES: usize = 16 * 1024 * 1024;
 const THUMB_WIDTH: u32 = 320;
 const THUMB_HEIGHT: u32 = 200;
 
+/// The Clipboard1 D-Bus object: the saved history and the image files it refers to.
 pub struct ClipboardService {
     history: ClipboardHistory,
     store: Store<ClipboardHistory>,
@@ -35,6 +37,7 @@ pub struct ClipboardService {
 }
 
 impl ClipboardService {
+    /// Loads the history and tidies it against the image files on disk.
     pub fn load() -> Self {
         let mut store = Store::new("clipboard");
         let mut history: ClipboardHistory = store.load();
@@ -69,6 +72,7 @@ impl ClipboardService {
         }
     }
 
+    /// Saves the history and signals `Items`.
     async fn changed(&self, emitter: &SignalEmitter<'_>) -> zbus::Result<()> {
         self.store.save(&self.history);
         self.items_changed(emitter).await
@@ -82,6 +86,7 @@ impl ClipboardService {
         Ok(added.id)
     }
 
+    /// The `Items` list, built fresh from the history.
     fn view(&self) -> Vec<ItemView<'_>> {
         self.history
             .items()
@@ -130,10 +135,12 @@ struct ItemView<'a> {
     pinned: bool,
 }
 
+/// The error for an id that is not in the history.
 fn not_found(id: u64) -> fdo::Error {
     fdo::Error::InvalidArgs(format!("no clipboard item with id {id}"))
 }
 
+/// A clip the history refused, as a D-Bus error.
 fn invalid(err: ClipError) -> fdo::Error {
     fdo::Error::InvalidArgs(err.to_string())
 }
@@ -264,6 +271,7 @@ impl ClipboardService {
         Ok(self.changed(&emitter).await?)
     }
 
+    /// Pins or unpins an item; at most `MAX_PINNED` can be pinned.
     async fn set_pinned(
         &mut self,
         id: u64,
@@ -282,6 +290,7 @@ impl ClipboardService {
         Ok(self.changed(&emitter).await?)
     }
 
+    /// Removes one item, and its image files if nothing else uses them.
     async fn remove(
         &mut self,
         id: u64,
@@ -327,14 +336,17 @@ struct ClipFiles {
 }
 
 impl ClipFiles {
+    /// The image as copied.
     fn image(&self, hash: &str) -> PathBuf {
         self.dir.join(format!("{hash}.png"))
     }
 
+    /// Its thumbnail.
     fn thumb(&self, hash: &str) -> PathBuf {
         self.dir.join(format!("{hash}.thumb.png"))
     }
 
+    /// Both files are there.
     fn has(&self, hash: &str) -> bool {
         self.image(hash).is_file() && self.thumb(hash).is_file()
     }
@@ -416,6 +428,7 @@ fn remove_file(path: &Path) {
     }
 }
 
+/// For D-Bus, which wants text even for a path that is not UTF-8.
 fn path_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }

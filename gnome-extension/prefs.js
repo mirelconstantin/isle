@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
-// Preferences: island look and behaviour (GSettings), clipboard history, and
-// focus timer durations (stored by isled, edited over D-Bus).
+// Isle's Settings window: GSettings for the island and the assistant, plus what isled keeps itself
+// (timer lengths, clipboard history, AI models), over D-Bus.
 
 import Adw from 'gi://Adw';
 import Gdk from 'gi://Gdk';
@@ -16,6 +17,7 @@ import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/ex
 import {DesktopAppInfo} from './src/appInfo.js';
 import {Bot, COLORS, SHAPES, paletteFor} from './src/bot.js';
 import {paintRim} from './src/glow.js';
+import * as WorldClocks from './src/worldClocks.js';
 
 const DAEMON = 'io.github.zickrian.isle.Daemon';
 const DAEMON_PATH = '/io/github/zickrian/isle/Daemon';
@@ -26,21 +28,39 @@ const ASSISTANT_INTERFACE = 'io.github.zickrian.isle.Assistant1';
 /** Edits to the timer are sent once typing pauses for this long. */
 const SAVE_DELAY_MS = 400;
 
+// Runs in a process of its own when Settings opens, never inside GNOME Shell.
 export default class IslePreferences extends ExtensionPreferences {
+    // Island, Clipboard, Focus Timer, Assistant, AI Usage and About, in that order.
     fillPreferencesWindow(window) {
         const settings = this.getSettings();
         window.set_default_size(560, 680);
-        window.add(this._islandPage(settings));
+        window.add(this._islandPage(settings, window));
         window.add(this._clipboardPage(settings, window));
         window.add(this._timerPage(settings, window));
-        window.add(this._voicePage(settings));
+        window.add(this._voicePage(settings, window));
         window.add(this._usagePage(settings));
         window.add(this._aboutPage(settings, window));
+        // A page asked for by the island (its Update button: About), once, also while open.
+        const showAsked = () => {
+            const asked = settings.get_string('prefs-page');
+            if (!asked)
+                return false;
+            settings.reset('prefs-page');
+            window.visible_page_name = asked;
+            return true;
+        };
+        // Asked while open (perhaps behind other windows): brought forward too.
+        const asked = settings.connect('changed::prefs-page', () => showAsked() && window.present());
+        window.connect('close-request', () => {
+            settings.disconnect(asked);
+            return false;
+        });
+        showAsked();
     }
 
     // The version, where to get help, a bug report to paste, and a way back to the defaults.
     _aboutPage(settings, window) {
-        const page = new Adw.PreferencesPage({title: 'About', icon_name: 'help-about-symbolic'});
+        const page = new Adw.PreferencesPage({title: 'About', name: 'about', icon_name: 'help-about-symbolic'});
         const about = new Adw.PreferencesGroup({title: `Isle ${this.metadata['version-name'] ?? ''}`.trim(),
             description: 'A notch-style island for GNOME. © 2026 zickrian, free software under the GPL.'});
         const link = (title, subtitle, url) => {
@@ -50,7 +70,7 @@ export default class IslePreferences extends ExtensionPreferences {
             return row;
         };
         // Whether a newer Isle is out, as isled last found, and the switch for asking.
-        for (const row of updateRows(settings, window, this.metadata['version-name'] ?? '', this.path.startsWith('/usr/')))
+        for (const row of updateRows(settings, window, this.metadata['version-name'] ?? '', this.path))
             about.add(row);
         about.add(link('Website', 'Features, installing and updating', 'https://github.com/zickrian/isle'));
         about.add(link('Report a problem', 'On GitHub; paste the report below in it', 'https://github.com/zickrian/isle/issues/new/choose'));
@@ -69,8 +89,8 @@ export default class IslePreferences extends ExtensionPreferences {
             body: 'Every option goes back to its default. Your tasks, events, clipboard history and files stay.',
             action: 'Reset',
         }, () => {
-            // Not Isle's state: which update was announced, and a focus session's Do Not Disturb.
-            const state = ['update-shown', 'focus-dnd-owned'];
+            // Not Isle's state: which update was announced, the page asked for, and a focus session's Do Not Disturb.
+            const state = ['update-shown', 'prefs-page', 'focus-dnd-owned'];
             for (const key of settings.settings_schema.list_keys().filter(key => !state.includes(key)))
                 settings.reset(key);
         }));
@@ -88,7 +108,7 @@ export default class IslePreferences extends ExtensionPreferences {
             description: found.length
                 ? 'How much of your plans\' limits is used, on a Usage page in the open island, with a warning ' +
                   'as one nears its end. Found from the apps you are signed in to; nothing else to set up.'
-                : 'Sign in to Claude Code (claude) or Codex (codex) and your plan shows up here.',
+                : 'Sign in to Claude Code (claude), Codex (codex) or Grok (grok) and your plan shows up here.',
         });
         const enabled = switchRow(settings, 'usage-enabled', 'Show AI usage', 'The Usage page and its warnings');
         group.add(enabled);
@@ -127,25 +147,27 @@ export default class IslePreferences extends ExtensionPreferences {
         return page;
     }
 
-    _voicePage(settings) {
+    // The assistant: which AI and model, speech, the conversation, and its look.
+    _voicePage(settings, window) {
         const page = new Adw.PreferencesPage({title: 'Assistant', icon_name: 'audio-input-microphone-symbolic'});
         const installed = AI_PROVIDERS.filter(provider => findProgram(provider.command));
         const group = new Adw.PreferencesGroup({
             title: 'Voice Assistant',
-            description: 'Press the shortcut (or the mic in the open island) and speak. Speech is recognised on this ' +
+            description: 'Press the shortcut (or the ✦ in the open island) and speak. Speech is recognised on this ' +
                 'computer (set up once with isle-setup-voice in a terminal); the request goes to the AI you pick, with your ' +
                 'own sign-in and plan.',
         });
-        page.add(lookGroup(settings));
-        group.add(switchRow(settings, 'voice-assistant', 'Voice assistant', 'The shortcut and the mic in the open island'));
+        group.add(switchRow(settings, 'voice-assistant', 'AI assistant',
+            'The shortcut and the ✦ in the open island. Off: Isle never asks an AI'));
         group.add(shortcutRow(settings, 'voice-shortcut', 'Shortcut', 'Opens the assistant and listens'));
 
+        // Automatic is the first signed in, else the first installed: as isled picks (brain.rs `pick`).
+        const automatic = installed.find(p => signedIn(p.id)) ?? installed[0];
         // Only the AIs installed here are offered; with none, the assistant says how to get one.
         const provider = choiceRow(settings, 'voice-provider', 'AI', installed.length
             ? 'Answers with your own sign-in; Isle runs its actions'
-            : 'Install Claude Code, Codex or Antigravity (agy), and sign in', [
-            ['auto', installed.length === 1 ? `Automatic (${installed[0].name})`
-                : installed.length ? 'Automatic (the one you are signed in to)' : 'None installed'],
+            : 'Install Claude Code, Codex, Grok or Antigravity (agy), and sign in', [
+            ['auto', automatic ? `Automatic (${automatic.name})` : 'None installed'],
             ...installed.map(({id, name}) => [id, name]),
         ]);
         const model = new Adw.ComboRow({title: 'Model'});
@@ -161,8 +183,8 @@ export default class IslePreferences extends ExtensionPreferences {
                 syncing = false;
             }
         };
-        // Automatic is the first signed in, else the first installed: as isled picks (brain.rs `pick`).
-        const automatic = installed.find(p => signedIn(p.id)) ?? installed[0];
+        // Each AI's plan and the models it allows, as isled last found them (`Assistant1.Models`).
+        const catalog = new ModelCatalog(settings);
         const fillModel = () => {
             const wanted = settings.get_string('voice-provider');
             const current = installed.find(p => p.id === wanted) ?? automatic;
@@ -170,12 +192,20 @@ export default class IslePreferences extends ExtensionPreferences {
             if (!current)
                 return;
             modelKey = current.modelKey;
-            modelChoices = current.models();
-            // A model set by hand, not in the list, stays shown and kept.
+            const entry = catalog.of(current.id);
             const value = settings.get_string(modelKey);
-            if (!modelChoices.some(([id]) => id === value))
-                modelChoices.push([value, value || 'Default']);
-            model.subtitle = current.about;
+            // Only what the plan allows; until isled has asked, just the AI's own default.
+            const def = entry?.default_name ? `Default (${entry.default_name})` : `${current.name}’s default`;
+            modelChoices = [['', def], ...(entry?.models ?? []).map(({id, name}) => [id, name])];
+            // A pick the plan no longer allows stays (it comes back once allowed), marked as not used now.
+            if (!modelChoices.some(([id]) => id === value)) {
+                const known = entry?.models?.length > 0;
+                const shown = value[0].toUpperCase() + value.slice(1);
+                modelChoices.push([value, known ? `${shown} · not on your plan` : shown]);
+            }
+            const about = entry?.plan ? `${current.planName} ${entry.plan} · ${current.about}`
+                : current.about[0].toUpperCase() + current.about.slice(1);
+            model.subtitle = entry || catalog.loaded ? about : 'Checking which models your plan includes…';
             model.model = Gtk.StringList.new(modelChoices.map(([, label]) => label));
             model.selected = Math.max(0, modelChoices.findIndex(([id]) => id === value));
         };
@@ -187,7 +217,13 @@ export default class IslePreferences extends ExtensionPreferences {
                 settings.set_string(modelKey, value);
         });
         const changed = settings.connect('changed::voice-provider', syncModel);
-        model.connect('destroy', () => settings.disconnect(changed));
+        catalog.connect(syncModel);
+        // Closed, not just destroyed: the settings' handler would keep the row (and this) alive.
+        window.connect('close-request', () => {
+            settings.disconnect(changed);
+            catalog.destroy();
+            return false;
+        });
         syncModel();
 
         const options = [provider, model];
@@ -227,6 +263,9 @@ export default class IslePreferences extends ExtensionPreferences {
             group.add(row);
         }
         page.add(group);
+        const look = lookGroup(settings);
+        settings.bind('voice-assistant', look, 'sensitive', Gio.SettingsBindFlags.GET);
+        page.add(look);
 
         const notes = new Adw.PreferencesGroup({
             title: 'About the AIs',
@@ -239,6 +278,7 @@ export default class IslePreferences extends ExtensionPreferences {
         return page;
     }
 
+    // History on or off, clearing it, and the apps whose copies are never kept.
     _clipboardPage(settings, window) {
         const page = new Adw.PreferencesPage({title: 'Clipboard', icon_name: 'edit-paste-symbolic'});
 
@@ -264,14 +304,12 @@ export default class IslePreferences extends ExtensionPreferences {
         return page;
     }
 
-    _islandPage(settings) {
+    // Look, pages, world clocks, alerts and calls.
+    _islandPage(settings, window) {
         const page = new Adw.PreferencesPage({title: 'Island', icon_name: 'preferences-desktop-appearance-symbolic'});
 
         const look = new Adw.PreferencesGroup({title: 'Appearance'});
-        look.add(choiceRow(settings, 'top-bar-style', 'Top bar', 'Glass shows the island as a notch, like on a Mac', [
-            ['glass', 'Glass'],
-            ['black', 'Black'],
-        ]));
+        look.add(topBarRow(settings, window));
         look.add(switchRow(settings, 'compact-top-bar', 'Compact top bar', 'A slimmer top bar that frames the island like a bezel'));
         look.add(switchRow(settings, 'island-in-top-bar', 'Island inside the top bar',
             'Like a notch: the closed island never covers windows'));
@@ -295,8 +333,15 @@ export default class IslePreferences extends ExtensionPreferences {
         byHover();
         look.add(delay);
         page.add(look);
+        page.add(pagesGroup(settings, window));
+        page.add(worldClocksGroup(settings, window));
 
         const alerts = new Adw.PreferencesGroup({title: 'Alerts'});
+        // On: in the island; off: left to GNOME's own banners (`gnome-banners`).
+        const notifications = new Adw.SwitchRow({title: 'Notifications',
+            subtitle: 'Apps’ notifications in the island, with their buttons, as GNOME shows them'});
+        settings.bind('gnome-banners', notifications, 'active', Gio.SettingsBindFlags.INVERT_BOOLEAN);
+        alerts.add(notifications);
         alerts.add(switchRow(settings, 'replace-osd', 'Volume and brightness', 'Show them in the island instead of the centre of the screen'));
         alerts.add(switchRow(settings, 'alert-power', 'Charging and battery', 'Plugged in, unplugged, full and low'));
         alerts.add(switchRow(settings, 'alert-network', 'Network', 'When the connection drops'));
@@ -307,8 +352,6 @@ export default class IslePreferences extends ExtensionPreferences {
         const eventMinutes = spinRow(settings, 'event-alert-minutes', 'Minutes before an event', null, 1, 60);
         settings.bind('event-alerts', eventMinutes, 'sensitive', Gio.SettingsBindFlags.GET);
         alerts.add(eventMinutes);
-        alerts.add(switchRow(settings, 'gnome-banners', 'GNOME’s notification banners',
-            'Show notifications as GNOME does instead of in the island'));
         alerts.add(choiceRow(settings, 'super-v', 'Super+V', 'GNOME’s calendar shortcut', [
             ['isle', 'Isle’s clipboard history'],
             ['gnome', 'GNOME’s calendar and notifications'],
@@ -332,6 +375,7 @@ export default class IslePreferences extends ExtensionPreferences {
         return page;
     }
 
+    // Lengths live in isled, so this page needs it running; changes are saved as typing pauses.
     _timerPage(settings, window) {
         const page = new Adw.PreferencesPage({title: 'Focus Timer', icon_name: 'alarm-symbolic'});
         const focus = new Adw.PreferencesGroup({title: 'While Focusing'});
@@ -421,6 +465,7 @@ function lookOf(settings) {
         palette: paletteFor(settings.get_string('bot-color'), settings.get_string('bot-glow'))};
 }
 
+/** A Gdk.RGBA as "#rrggbb", as the colour keys store it. */
 const hexOf = rgba => `#${[rgba.red, rgba.green, rgba.blue].map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join('')}`;
 
 /** A still copy of the assistant `size` px big, redrawn by `update(look)`. */
@@ -636,40 +681,332 @@ function agentsFound() {
     ].filter(({provider}) => agents[provider]?.found);
 }
 
+/** A switch bound to a boolean key. */
 function switchRow(settings, key, title, subtitle) {
     const row = new Adw.SwitchRow({title, subtitle});
     settings.bind(key, row, 'active', Gio.SettingsBindFlags.DEFAULT);
     return row;
 }
 
+/** The top bar beside the island, from glass to black, on a slider; the island itself stays black. */
+function topBarRow(settings, window) {
+    const row = new Adw.ActionRow({title: 'Top bar'});
+    const scale = new Gtk.Scale({
+        adjustment: new Gtk.Adjustment({lower: 0, upper: 100, step_increment: 5, page_increment: 25}),
+        draw_value: false, width_request: 150, valign: Gtk.Align.CENTER,
+    });
+    scale.add_mark(50, Gtk.PositionType.BOTTOM, null);
+    const ends = new Gtk.Box({spacing: 6, valign: Gtk.Align.CENTER});
+    ends.append(new Gtk.Label({label: 'Glass', css_classes: ['dim-label', 'caption']}));
+    ends.append(scale);
+    ends.append(new Gtk.Label({label: 'Black', css_classes: ['dim-label', 'caption']}));
+    row.add_suffix(ends);
+    row.activatable_widget = scale;
+    // Unset, the older Glass or Black choice says (as TopBar.opacity in shell.js).
+    const current = () => settings.get_user_value('top-bar-opacity') ? settings.get_int('top-bar-opacity')
+        : settings.get_string('top-bar-style') === 'black' ? 100 : 0;
+    const describe = value => {
+        row.subtitle = value <= 0 ? 'See-through, like on a Mac' : value >= 100 ? 'The island blends into the bar'
+            : `${value}% black`;
+    };
+    let syncing = false;
+    scale.connect('value-changed', () => {
+        if (syncing)
+            return;
+        // Stored in steps of 5; the knob stays under the pointer meanwhile.
+        const value = Math.round(scale.get_value() / 5) * 5;
+        describe(value);
+        settings.set_int('top-bar-opacity', value);
+        // Kept in step, for anything that still reads the older choice.
+        const style = value >= 100 ? 'black' : 'glass';
+        if (settings.get_string('top-bar-style') !== style)
+            settings.set_string('top-bar-style', style);
+    });
+    const sync = () => {
+        // Moved only for a change from elsewhere: the step the knob is in already is this one.
+        if (Math.round(scale.get_value() / 5) * 5 !== current()) {
+            syncing = true;
+            scale.set_value(current());
+            syncing = false;
+        }
+        describe(current());
+    };
+    const changed = ['top-bar-opacity', 'top-bar-style'].map(key => settings.connect(`changed::${key}`, sync));
+    window.connect('close-request', () => {
+        changed.forEach(id => settings.disconnect(id));
+        return false;
+    });
+    sync();
+    return row;
+}
+
+/** The open island's pages that can be left out, in tab order, with what goes with each. */
+const PAGES = [
+    ['music', 'Music', 'audio-x-generic-symbolic', 'The player and lyrics, and the song in the closed island'],
+    ['notifications', 'Notifications', 'preferences-system-notifications-symbolic', 'The list to look back at, and its unread dot; alerts show either way'],
+    ['focus', 'Focus', 'alarm-symbolic', 'The Pomodoro timer'],
+    ['reminders', 'Reminders', 'object-select-symbolic', 'Your to-do list'],
+    ['shelf', 'Shelf', 'edit-paste-symbolic', 'Clipboard history (Super+V) and the files tray'],
+    ['calendar', 'Calendar', 'x-office-calendar-symbolic', 'The month, its events and world clocks'],
+    ['devices', 'Devices', 'bluetooth-active-symbolic', 'The Bluetooth devices connected now, and their batteries'],
+];
+
+/** A switch per page; the last one on can't be turned off, so the island always has a page. */
+function pagesGroup(settings, window) {
+    const group = new Adw.PreferencesGroup({title: 'Pages', description: 'The tabs of the open island. Turn off the ones you don’t use.'});
+    const rows = PAGES.map(([name, title, iconName, subtitle]) => {
+        const row = new Adw.SwitchRow({title, subtitle});
+        row.add_prefix(new Gtk.Image({icon_name: iconName}));
+        row.connect('notify::active', () => {
+            const hidden = settings.get_strv('hidden-pages').filter(other => other !== name);
+            if (!row.active)
+                hidden.push(name);
+            if (hidden.join() !== settings.get_strv('hidden-pages').join())
+                settings.set_strv('hidden-pages', hidden);
+        });
+        group.add(row);
+        return [name, row];
+    });
+    // The Usage page's own switch, here too, so every tab is in one place.
+    const usage = switchRow(settings, 'usage-enabled', 'AI Usage', 'Your AI plans’ limits, and warnings as one nears its end');
+    usage.add_prefix(new Gtk.Image({icon_name: 'power-profile-performance-symbolic'}));
+    if (!usageProviders().length) {
+        usage.sensitive = false;
+        usage.subtitle = 'Sign in to Claude Code or Codex to see your plan';
+    }
+    group.add(usage);
+    // Not a page but the ✦ beside the tabs: turning it off is how to use Isle without any AI.
+    const assistant = switchRow(settings, 'voice-assistant', 'AI Assistant', 'The ✦ in the open island and its shortcut');
+    assistant.add_prefix(new Gtk.Image({icon_name: 'audio-input-microphone-symbolic'}));
+    group.add(assistant);
+    const sync = () => {
+        const hidden = settings.get_strv('hidden-pages');
+        const shown = rows.filter(([name]) => !hidden.includes(name));
+        for (const [name, row] of rows) {
+            row.active = !hidden.includes(name);
+            const last = shown.length === 1 && row.active;
+            row.sensitive = !last;
+            row.subtitle = last ? 'The island keeps at least one page' : PAGES.find(([page]) => page === name)[3];
+        }
+    };
+    const changed = settings.connect('changed::hidden-pages', sync);
+    window.connect('close-request', () => {
+        settings.disconnect(changed);
+        return false;
+    });
+    sync();
+    return group;
+}
+
+/** GNOME's World Clocks: the cities, each with its time and a remove button, and a search to add one. */
+function worldClocksGroup(settings, window) {
+    const shell = WorldClocks.shellSettings();
+    const group = new Adw.PreferencesGroup({
+        title: 'World Clocks',
+        description: 'The time in other cities on the Calendar page. The same list as GNOME’s calendar menu and Clocks app.',
+    });
+    const show = switchRow(settings, 'world-clocks', 'Show world clocks', 'Under the day’s events; click them for more');
+    group.add(show);
+    if (!shell) {
+        show.sensitive = false;
+        show.subtitle = 'GNOME’s world clocks are not available here';
+        return group;
+    }
+    // ButtonRow since libadwaita 1.6 (GNOME 47).
+    const add = Adw.ButtonRow ? new Adw.ButtonRow({title: 'Add a City…', start_icon_name: 'list-add-symbolic'})
+        : new Adw.ActionRow({title: 'Add a City…', activatable: true});
+    if (!Adw.ButtonRow)
+        add.add_prefix(new Gtk.Image({icon_name: 'list-add-symbolic'}));
+    add.connect('activated', () => chooseCity(group.get_root(), location => {
+        const cities = WorldClocks.readCities(shell).map(city => city.location);
+        if (!cities.some(other => other.equal(location)))
+            WorldClocks.writeCities(shell, [...cities, location]);
+    }));
+    let rows = [];
+    /** Each row's time and day, written again each minute while Settings is open. */
+    let ticks = [];
+    const refresh = () => {
+        rows.forEach(row => group.remove(row));
+        const cities = WorldClocks.readCities(shell);
+        ticks = [];
+        rows = cities.map(({location, name, timezone}) => {
+            const country = location.get_country_name?.() ?? '';
+            const row = new Adw.ActionRow({title: name});
+            const time = new Gtk.Label({css_classes: ['numeric', 'dim-label'], valign: Gtk.Align.CENTER});
+            row.add_suffix(time);
+            const tick = () => {
+                const now = GLib.DateTime.new_now_local();
+                const when = [WorldClocks.dayText(timezone, now), WorldClocks.offsetText(timezone, now) || 'Same time as here']
+                    .filter(Boolean).join(' · ');
+                row.subtitle = [country, when].filter(Boolean).join(' · ');
+                time.label = now.to_timezone(timezone).format(useTwelveHour() ? '%l:%M %p' : '%H:%M').trim();
+            };
+            tick();
+            ticks.push(tick);
+            const remove = new Gtk.Button({icon_name: 'list-remove-symbolic', valign: Gtk.Align.CENTER, css_classes: ['flat'],
+                tooltip_text: 'Remove this city'});
+            remove.connect('clicked', () => WorldClocks.writeCities(shell,
+                WorldClocks.readCities(shell).map(city => city.location).filter(other => !other.equal(location))));
+            row.add_suffix(remove);
+            settings.bind('world-clocks', row, 'sensitive', Gio.SettingsBindFlags.GET);
+            return row;
+        });
+        group.remove(add);
+        rows.forEach(row => group.add(row));
+        group.add(add);
+    };
+    group.add(add);
+    settings.bind('world-clocks', add, 'sensitive', Gio.SettingsBindFlags.GET);
+    const changed = shell.connect('changed::locations', refresh);
+    // At each minute's turn by the clock, so a suspend or a changed clock is caught up at the next.
+    let timer = 0;
+    const next = () => {
+        timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, (60 - GLib.DateTime.new_now_local().get_second()) * 1000 + 50, () => {
+            ticks.forEach(tick => tick());
+            next();
+            return GLib.SOURCE_REMOVE;
+        });
+    };
+    next();
+    window.connect('close-request', () => {
+        shell.disconnect(changed);
+        GLib.Source.remove(timer);
+        return false;
+    });
+    refresh();
+    return group;
+}
+
+/** Whether GNOME's clock is set to 12 hours. */
+function useTwelveHour() {
+    return new Gio.Settings({schema_id: 'org.gnome.desktop.interface'}).get_string('clock-format') === '12h';
+}
+
+/** A dialog to search GNOME's list of cities; `onPick` gets the one chosen. */
+function chooseCity(window, onPick) {
+    const cities = WorldClocks.allCities();
+    const dialog = new Adw.Dialog({title: 'Add a City', content_width: 420, content_height: 480});
+    const view = new Adw.ToolbarView();
+    view.add_top_bar(new Adw.HeaderBar());
+    const box = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, spacing: 12, margin_start: 12, margin_end: 12, margin_bottom: 12});
+    const search = new Gtk.SearchEntry({placeholder_text: 'Search for a city'});
+    box.append(search);
+    const list = new Gtk.ListBox({css_classes: ['boxed-list'], selection_mode: Gtk.SelectionMode.NONE, valign: Gtk.Align.START});
+    const scroller = new Gtk.ScrolledWindow({child: list, vexpand: true, hscrollbar_policy: Gtk.PolicyType.NEVER});
+    box.append(scroller);
+    const empty = new Adw.StatusPage({icon_name: 'find-location-symbolic', title: 'Search for a City',
+        description: 'Type a city’s name, like Tokyo or New York', vexpand: true});
+    box.append(empty);
+    view.set_content(box);
+    dialog.set_child(view);
+    const fill = () => {
+        list.remove_all();
+        const query = search.text.trim().toLowerCase();
+        // Names starting with what was typed first: "par" finds Paris before Parramatta's suburbs.
+        const starts = city => city.name.toLowerCase().startsWith(query);
+        const found = query ? cities.filter(city => city.search.includes(query))
+            .sort((a, b) => starts(b) - starts(a)).slice(0, 40) : [];
+        for (const city of found) {
+            const row = new Adw.ActionRow({title: city.name, subtitle: city.place, activatable: true});
+            row.connect('activated', () => {
+                onPick(city.location);
+                dialog.close();
+            });
+            list.append(row);
+        }
+        scroller.visible = found.length > 0;
+        empty.visible = found.length === 0;
+        empty.title = query ? 'No City Found' : 'Search for a City';
+        empty.description = query ? 'Try another spelling, or a bigger city nearby' : 'Type a city’s name, like Tokyo or New York';
+    };
+    search.connect('search-changed', fill);
+    fill();
+    dialog.present(window);
+}
+
 /** The AI CLIs the voice assistant can ask, in the order "Automatic" tries them, signed-in ones first (as isled does). */
 const AI_PROVIDERS = [
-    {
-        id: 'claude', name: 'Claude Code', command: 'claude', modelKey: 'voice-claude-model',
-        about: 'What Claude answers with',
-        models: () => [
-            ['haiku', 'Haiku (fastest, less reliable)'],
-            ['sonnet', 'Sonnet'],
-            ['opus', 'Opus (smartest, slower)'],
-            ['', 'Claude Code\'s default'],
-        ],
-    },
-    {
-        id: 'codex', name: 'Codex', command: 'codex', modelKey: 'voice-codex-model',
-        about: 'What Codex answers with, with little reasoning, to be quick',
-        models: () => [['', 'Codex\'s default'], ...codexModels()],
-    },
-    {
-        id: 'agy', name: 'Antigravity', command: 'agy', modelKey: 'voice-agy-model',
-        about: 'What agy answers with',
-        models: () => [
-            ['gemini-3.8-flash-low', 'Gemini Flash (fastest)'],
-            ['gemini-3.8-flash-medium', 'Gemini Flash (medium)'],
-            ['gemini-3.8-flash-high', 'Gemini Flash (high)'],
-            ['claude-sonnet-4-6', 'Claude Sonnet'],
-        ],
-    },
+    {id: 'claude', name: 'Claude Code', planName: 'Claude', command: 'claude', modelKey: 'voice-claude-model',
+        about: 'what Claude answers with'},
+    {id: 'codex', name: 'Codex (ChatGPT)', planName: 'ChatGPT', command: 'codex', modelKey: 'voice-codex-model',
+        about: 'what ChatGPT answers with, quickly'},
+    {id: 'grok', name: 'Grok', planName: 'Grok', command: 'grok', modelKey: 'voice-grok-model',
+        about: 'what Grok answers with, quickly'},
+    {id: 'agy', name: 'Antigravity', planName: 'Antigravity', command: 'agy', modelKey: 'voice-agy-model',
+        about: 'what Antigravity answers with'},
 ];
+
+/** isled's `Models`: per AI `{plan, default, default_name, models: [{id, name}]}`, followed while Settings is open. */
+class ModelCatalog {
+    /** Reads the property now and follows its changes. */
+    constructor(settings) {
+        this._settings = settings;
+        this._models = {};
+        this._callbacks = [];
+        this._subscription = Gio.DBus.session.signal_subscribe(DAEMON, 'org.freedesktop.DBus.Properties',
+            'PropertiesChanged', DAEMON_PATH, ASSISTANT_INTERFACE, Gio.DBusSignalFlags.NONE,
+            (_conn, _sender, _path, _iface, _signal, params) => {
+                const models = params.deepUnpack()[1].Models?.deepUnpack();
+                if (models !== undefined)
+                    this._set(models);
+            });
+        Gio.DBus.session.call(DAEMON, DAEMON_PATH, 'org.freedesktop.DBus.Properties', 'Get',
+            new GLib.Variant('(ss)', [ASSISTANT_INTERFACE, 'Models']), null, Gio.DBusCallFlags.NONE, -1, null,
+            (conn, result) => {
+                try {
+                    this._set(conn.call_finish(result).deepUnpack()[0].deepUnpack());
+                } catch {
+                    // An isled from before 1.4 (or none): Settings offers only each AI's own default.
+                    this._set('{}');
+                }
+            });
+        // The plan may have changed since: isled asks again, and the list follows. With the assistant
+        // off Isle asks no AI, so only once it is turned on.
+        this._assistantChanged = settings.connect('changed::voice-assistant', () => this._refresh());
+        this._refresh();
+    }
+
+    /** Has isled ask each AI again, only with the assistant on. */
+    _refresh() {
+        if (this._settings.get_boolean('voice-assistant')) {
+            Gio.DBus.session.call(DAEMON, DAEMON_PATH, ASSISTANT_INTERFACE, 'RefreshModels', null, null,
+                Gio.DBusCallFlags.NONE, -1, null, null);
+        }
+    }
+
+    /** Whether isled answered (or isn't there to): no more waiting for it. */
+    get loaded() {
+        return this._loaded ?? false;
+    }
+
+    /** Bad JSON counts as nothing known. */
+    _set(json) {
+        this._loaded = true;
+        try {
+            this._models = JSON.parse(json) ?? {};
+        } catch {
+            this._models = {};
+        }
+        this._callbacks.forEach(callback => callback());
+    }
+
+    /** AI `id`'s entry, or null. */
+    of(id) {
+        return this._models[id] ?? null;
+    }
+
+    /** Called on every change; no disconnect, `destroy` drops them all. */
+    connect(callback) {
+        this._callbacks.push(callback);
+    }
+
+    /** Must run when the window closes, or the D-Bus handler keeps it alive. */
+    destroy() {
+        Gio.DBus.session.signal_unsubscribe(this._subscription);
+        this._settings.disconnect(this._assistantChanged);
+        this._callbacks = [];
+    }
+}
 
 /** Where Claude Code keeps its settings and sign-in: `$CLAUDE_CONFIG_DIR`, else ~/.claude. */
 function claudeConfigDir() {
@@ -679,6 +1016,11 @@ function claudeConfigDir() {
 /** The user's own Codex home: `$CODEX_HOME`, else ~/.codex. */
 function codexHome() {
     return GLib.getenv('CODEX_HOME') || GLib.build_filenamev([GLib.get_home_dir(), '.codex']);
+}
+
+/** The user's own Grok home: `$GROK_HOME`, else ~/.grok. */
+function grokHome() {
+    return GLib.getenv('GROK_HOME') || GLib.build_filenamev([GLib.get_home_dir(), '.grok']);
 }
 
 /** Whether AI `id` has a sign-in, checked as isled does (brain.rs `signed_in`). */
@@ -703,6 +1045,8 @@ function signedIn(id) {
     }
     case 'codex':
         return exists(codexHome(), 'auth.json') || env('OPENAI_API_KEY');
+    case 'grok':
+        return exists(grokHome(), 'auth.json') || env('XAI_API_KEY');
     case 'agy':
         return exists(GLib.get_home_dir(), '.gemini/antigravity-cli/antigravity-oauth-token');
     default:
@@ -720,7 +1064,7 @@ function findProgram(command) {
         GLib.build_filenamev([env('BUN_INSTALL', `${home}/.bun`), 'bin']),
         GLib.build_filenamev([env('VOLTA_HOME', `${home}/.volta`), 'bin']),
         env('PNPM_HOME', `${home}/.local/share/pnpm`),
-        ...['.local/share/fnm/aliases/default/bin', '.fnm/aliases/default/bin', '.claude/local',
+        ...['.local/share/fnm/aliases/default/bin', '.fnm/aliases/default/bin', '.claude/local', '.grok/bin',
             '.local/share/mise/shims', '.asdf/shims', '.yarn/bin', '.linuxbrew/bin', '.nix-profile/bin']
             .map(dir => GLib.build_filenamev([home, dir])),
         '/home/linuxbrew/.linuxbrew/bin', '/run/current-system/sw/bin',
@@ -753,36 +1097,19 @@ function nvmBins(home) {
     return versions.map(name => GLib.build_filenamev([root, name, 'bin']));
 }
 
-/** The models Codex lists, from the cache it keeps (Isle's own home for it, else the user's). */
-function codexModels() {
-    for (const dir of [[GLib.get_user_data_dir(), 'isle', 'codex'], [codexHome()]]) {
-        try {
-            const [, bytes] = GLib.file_get_contents(GLib.build_filenamev([...dir, 'models_cache.json']));
-            const models = JSON.parse(new TextDecoder().decode(bytes)).models ?? [];
-            return models.filter(m => m.visibility === 'list').map(m => [m.slug, m.display_name ?? m.slug]);
-        } catch {
-            // Not there, or not readable: the next place.
-        }
-    }
-    return [];
-}
-
-/** The AI providers signed in here, as rows to switch: Claude Code's sign-in, and Codex's (or its logs). */
+/** The AI providers signed in here, as rows to switch: Claude Code's sign-in, Codex's (or its logs), and Grok's. */
 // Where isled reads them (usage.rs): Claude Code's config dir, the user's Codex home and Isle's own.
 function usageProviders() {
     const providers = [];
-    try {
-        const [, bytes] = GLib.file_get_contents(GLib.build_filenamev([claudeConfigDir(), '.credentials.json']));
-        const plan = JSON.parse(new TextDecoder().decode(bytes)).claudeAiOauth?.subscriptionType ?? '';
-        providers.push({key: 'usage-claude', title: 'Claude',
-            subtitle: `${plan ? `${plan[0].toUpperCase()}${plan.slice(1)} plan, ` : ''}signed in with Claude Code`});
-    } catch {
-        // Not signed in to Claude Code.
-    }
+    // The plan's name is isled's (Settings → Assistant, the Usage page), as the apps name it.
+    if (GLib.file_test(GLib.build_filenamev([claudeConfigDir(), '.credentials.json']), GLib.FileTest.EXISTS))
+        providers.push({key: 'usage-claude', title: 'Claude', subtitle: 'Signed in with Claude Code'});
     const signedIn = GLib.file_test(GLib.build_filenamev([codexHome(), 'auth.json']), GLib.FileTest.EXISTS);
     const sessions = [[codexHome(), 'sessions'], [GLib.get_user_data_dir(), 'isle', 'codex', 'sessions']];
     if (signedIn || sessions.some(dir => GLib.file_test(GLib.build_filenamev(dir), GLib.FileTest.IS_DIR)))
         providers.push({key: 'usage-codex', title: 'ChatGPT', subtitle: 'Signed in with Codex'});
+    if (GLib.file_test(GLib.build_filenamev([grokHome(), 'auth.json']), GLib.FileTest.EXISTS))
+        providers.push({key: 'usage-grok', title: 'Grok', subtitle: 'Signed in with Grok'});
     return providers;
 }
 
@@ -808,6 +1135,7 @@ function choiceRow(settings, key, title, subtitle, choices) {
     return row;
 }
 
+/** Whole numbers from `min` to `max`, bound to an int key. */
 function spinRow(settings, key, title, subtitle, min, max) {
     const row = Adw.SpinRow.new_with_range(min, max, 1);
     row.title = title;
@@ -885,10 +1213,23 @@ function confirm(window, {heading, body, action}, onYes) {
         dialog.present();
 }
 
-/** Runs `isled --report` and puts what it says on the clipboard, saying so on `row`. */
 /** Where updating is explained, and the command that updates a one-line install. */
 const UPDATE_HELP = 'https://github.com/zickrian/isle/blob/main/docs/install.md#updating';
 const INSTALL_COMMAND = 'curl -fsSL https://raw.githubusercontent.com/zickrian/isle/main/get.sh | bash';
+const RELEASES = 'https://github.com/zickrian/isle/releases/latest';
+/** Installs version `$1` with that release's own get.sh (no sudo), appending to the log `$2`: first who runs
+ * it ("isle-update-pid <pid> <boot id>"), last "isle-update-done <exit status>". */
+const UPDATE_SCRIPT = 'exec >>"$2" 2>&1 </dev/null; ' +
+    'echo "isle-update-pid $$ $(cat /proc/sys/kernel/random/boot_id 2>/dev/null)"; set -o pipefail; ' +
+    'curl -fsSL --retry 2 "https://raw.githubusercontent.com/zickrian/isle/v$1/get.sh" | ISLE_VERSION="$1" bash; ' +
+    'echo "isle-update-done $?"';
+/** The update's log; its first line names the version ("isle-update 1.5.0"). */
+const UPDATE_LOG = GLib.build_filenamev([GLib.get_user_cache_dir(), 'isle', 'update.log']);
+/** Longest a started update may take to say who runs it before it counts as never started. */
+const UPDATE_START_US = 60 * 1000000;
+/** What the installer's output may say about its session; the rest of Settings' own environment is not passed. */
+const UPDATE_ENV = ['PATH', 'HOME', 'LANG', 'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'XDG_DATA_DIRS',
+    'XDG_SESSION_TYPE', 'XDG_CURRENT_DESKTOP'];
 
 /** Whether version `a` ("1.3.0") is newer than `b`, number by number (as isled's updates.rs). */
 function isNewer(a, b) {
@@ -909,15 +1250,123 @@ function checkedWhen(ms) {
     return days <= 0 ? 'today' : days === 1 ? 'yesterday' : then.format('%e %b').trim();
 }
 
-/** The About page's update status (up to date, or the newer version with how to get it) and the switch to
- * ask GitHub; both follow what isled last found (its updates.json) as it changes. */
-function updateRows(settings, window, version, packaged) {
-    const status = new Adw.ActionRow();
+/** The version in `dir`'s metadata.json, and when it was put there (µs): after an update, the new one,
+ * while the old still runs. */
+function versionIn(dir) {
+    try {
+        const file = Gio.File.new_for_path(GLib.build_filenamev([dir, 'metadata.json']));
+        const version = JSON.parse(new TextDecoder().decode(file.load_contents(null)[1]))['version-name'] ?? '';
+        const at = file.query_info('time::modified', Gio.FileQueryInfoFlags.NONE, null).get_modification_date_time().to_unix_usec();
+        return {version, at};
+    } catch {
+        return {version: '', at: 0};
+    }
+}
+
+/** Why the installer stopped, from its output: its own "Isle: …" line, a connection that failed, else its
+ * last words ("No space left on device"). */
+function updateFailure(output) {
+    const escapes = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
+    // Not Isle's markers, nor the steps ("==> Downloading").
+    const lines = output.split('\n').map(line => line.replace(escapes, '').trim())
+        .filter(line => line && !/^isle-update(-pid|-done)? /.test(line) && !line.startsWith('==>'));
+    const said = lines.filter(line => line.startsWith('Isle: ')).pop();
+    if (said)
+        return said.slice('Isle: '.length);
+    // curl: no such host, refused, timed out, TLS or the connection dropped; or GitHub answered an error.
+    if (lines.some(line => /^curl: \((6|7|28|35|56)\)/.test(line)))
+        return 'GitHub couldn’t be reached; check the internet connection';
+    if (lines.some(line => /^curl: \(22\)/.test(line)))
+        return 'GitHub couldn’t send it just now; try again in a while';
+    const last = lines.pop();
+    if (!last)
+        return 'the installer stopped';
+    // A program's own error: the reason when it is a known one ("No space left on device"), else the line
+    // without the program's name ("install: …", "isle-installer: line 1: …").
+    const reason = /: (No space left on device|Permission denied|Read-only file system|Disk quota exceeded)$/.exec(last);
+    return reason ? reason[1] : last.replace(/^[\w.-]+: (line \d+: )?/, '');
+}
+
+/** The last update per its log, {version, text, done: exit status or null, running}, or null. Running: its
+ * installer is alive in this boot, or it just started and hasn't named its pid yet. */
+function readUpdateLog() {
+    try {
+        const file = Gio.File.new_for_path(UPDATE_LOG);
+        const text = new TextDecoder().decode(file.load_contents(null)[1]);
+        const version = /^isle-update (\S+)/.exec(text)?.[1];
+        if (!version)
+            return null;
+        const done = /^isle-update-done (\d+)$/m.exec(text);
+        const [, pid, boot] = /^isle-update-pid (\d+) ?(\S*)$/m.exec(text) ?? [];
+        const at = file.query_info('time::modified', Gio.FileQueryInfoFlags.NONE, null).get_modification_date_time().to_unix_usec();
+        let running = false;
+        if (!done && pid) {
+            const [, thisBoot] = GLib.file_get_contents('/proc/sys/kernel/random/boot_id');
+            const cmdline = `/proc/${pid}/cmdline`;
+            running = boot === new TextDecoder().decode(thisBoot).trim() && GLib.file_test(cmdline, GLib.FileTest.EXISTS) &&
+                new TextDecoder().decode(GLib.file_get_contents(cmdline)[1]).includes('isle-installer');
+        } else if (!done) {
+            running = GLib.get_real_time() - at < UPDATE_START_US;
+        }
+        return {version, text, done: done ? Number(done[1]) : null, running, at};
+    } catch {
+        return null;
+    }
+}
+
+/** Runs the installer for `version` on its own, as a unit of the user's systemd (else a process of its own),
+ * so closing Settings doesn't stop it half way; its output goes to UPDATE_LOG. */
+function startUpdate(version) {
+    GLib.mkdir_with_parents(GLib.path_get_dirname(UPDATE_LOG), 0o700);
+    GLib.file_set_contents(UPDATE_LOG, `isle-update ${version}\n`);
+    const script = ['bash', '-c', UPDATE_SCRIPT, 'isle-installer', version, UPDATE_LOG];
+    const run = argv => Gio.Subprocess.new(argv, Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_SILENCE);
+    if (GLib.find_program_in_path('systemd-run')) {
+        const env = UPDATE_ENV.filter(name => GLib.getenv(name)).map(name => `--setenv=${name}=${GLib.getenv(name)}`);
+        // systemd reads "$$" in a command as a "$": written twice, the shell gets its own pid.
+        const escaped = script.map(arg => arg.split('$$').join('$$$$'));
+        const unit = run(['systemd-run', '--user', '--collect', '--quiet', `--unit=isle-update-${GLib.get_real_time()}`,
+            ...env, ...escaped]);
+        // No user systemd (some containers, other inits): run it directly.
+        unit.wait_check_async(null, (proc, result) => {
+            try {
+                proc.wait_check_finish(result);
+            } catch {
+                run(script);
+            }
+        });
+    } else {
+        run(script);
+    }
+}
+
+/** Logs out as GNOME's own menu does, asking first; GNOME Shell loads the new Isle at the next login. */
+function logOut() {
+    Gio.DBus.session.call('org.gnome.SessionManager', '/org/gnome/SessionManager', 'org.gnome.SessionManager',
+        'Logout', new GLib.Variant('(u)', [0]), null, Gio.DBusCallFlags.NONE, -1, null, (bus, result) => {
+            try {
+                bus.call_finish(result);
+            } catch {
+                GLib.spawn_async(null, ['gnome-session-quit', '--logout'], null, GLib.SpawnFlags.SEARCH_PATH, null);
+            }
+        });
+}
+
+/** The About page's update status and the switch to ask GitHub, following what isled last found (its
+ * updates.json). A one-line install updates in a click; a package says how its kind updates. */
+function updateRows(settings, window, version, dir) {
+    const packaged = dir.startsWith('/usr/');
+    // Its words come from the installer's output and GitHub too: shown as they are, never as markup.
+    const status = new Adw.ActionRow({use_markup: false});
     const icon = new Gtk.Image({valign: Gtk.Align.CENTER});
+    const spinner = new Gtk.Spinner({valign: Gtk.Align.CENTER, spinning: true, visible: false});
     status.add_prefix(icon);
-    const how = new Gtk.Button({label: 'How to update', valign: Gtk.Align.CENTER, css_classes: ['flat']});
+    status.add_prefix(spinner);
+    const button = (label, css) => new Gtk.Button({label, valign: Gtk.Align.CENTER, css_classes: css, visible: false});
+    const how = button('How', ['flat']);
     how.connect('clicked', () => new Gtk.UriLauncher({uri: UPDATE_HELP}).launch(window, null, null));
-    const copy = new Gtk.Button({label: 'Copy command', valign: Gtk.Align.CENTER, tooltip_text: INSTALL_COMMAND});
+    const copy = button('Copy command', []);
+    copy.tooltip_text = INSTALL_COMMAND;
     copy.connect('clicked', () => {
         window.get_display().get_clipboard().set(INSTALL_COMMAND);
         copy.label = 'Copied';
@@ -926,53 +1375,122 @@ function updateRows(settings, window, version, packaged) {
             return GLib.SOURCE_REMOVE;
         });
     });
-    status.add_suffix(how);
-    status.add_suffix(copy);
+    const download = button('Download', []);
+    download.connect('clicked', () => new Gtk.UriLauncher({uri: RELEASES}).launch(window, null, null));
+    const update = button('Update', ['suggested-action']);
+    const logOutButton = button('Log Out', ['suggested-action']);
+    logOutButton.connect('clicked', () => logOut());
+    for (const suffix of [how, copy, download, update, logOutButton])
+        status.add_suffix(suffix);
     const check = switchRow(settings, 'check-updates', 'Check for new versions', 'Asks GitHub once a day; nothing else is sent');
 
     const file = Gio.File.new_for_path(GLib.build_filenamev([GLib.get_user_data_dir(), 'isle', 'updates.json']));
-    const sync = () => {
-        let checked = null;
+    let updating = false;
+    /** The timer looking at a running update again (see `sync`). */
+    let watching = 0;
+    const show = (iconName, css, title, subtitle, buttons = []) => {
+        icon.icon_name = iconName;
+        icon.css_classes = css;
+        icon.visible = !updating;
+        spinner.visible = updating;
+        status.title = title;
+        status.subtitle = subtitle;
+        for (const suffix of [how, copy, download, update, logOutButton])
+            suffix.visible = buttons.includes(suffix);
+    };
+    const readChecked = () => {
         try {
-            checked = JSON.parse(new TextDecoder().decode(file.load_contents(null)[1]));
-        } catch {}
-        const on = settings.get_boolean('check-updates');
-        const newer = on && Boolean(checked?.latest) && isNewer(checked.latest, version);
-        how.visible = newer;
-        copy.visible = newer && !packaged;
-        icon.css_classes = newer ? ['accent'] : on && checked?.at_ms ? ['success'] : ['dim-label'];
-        if (!on) {
-            icon.icon_name = 'software-update-available-symbolic';
-            status.title = 'Not checking for new versions';
-            status.subtitle = 'Turn it on below to hear when one is out';
-        } else if (newer) {
-            icon.icon_name = 'software-update-available-symbolic';
-            status.title = `Isle ${checked.latest} is out`;
-            status.subtitle = packaged ? 'Install its new package, then log out and back in'
-                : 'Run the install command again, then log out and back in';
-        } else if (checked?.at_ms) {
-            icon.icon_name = 'object-select-symbolic';
-            status.title = 'You’re up to date';
-            status.subtitle = `Checked ${checkedWhen(checked.at_ms)}`;
-        } else {
-            icon.icon_name = 'software-update-available-symbolic';
-            status.title = 'Not checked yet';
-            status.subtitle = 'Isle asks GitHub once a day';
+            return JSON.parse(new TextDecoder().decode(file.load_contents(null)[1]));
+        } catch {
+            return null;
         }
     };
-    // isled writes it after each look (switched on, or once a day): the row follows while open.
-    const monitor = file.monitor_file(Gio.FileMonitorFlags.NONE, null);
-    monitor.connect('changed', () => sync());
+    const sync = () => {
+        const checked = readChecked();
+        const on = settings.get_boolean('check-updates');
+        const {version: installed, at: installedAt} = versionIn(dir);
+        const newer = on && Boolean(checked?.latest) && isNewer(checked.latest, version);
+        // The last update, also one started before Settings was closed and opened again.
+        const last = readUpdateLog();
+        updating = Boolean(last?.running);
+        // Failed or cut off (a logout or restart ended it). Not when its version is in place (the extension
+        // goes in whole, after the programs: what stopped came after) or any install came since (a terminal).
+        const failed = last && !last.running && last.done !== 0 && !packaged && last.version === checked?.latest &&
+            installed !== last.version && !(installedAt > last.at);
+        // While it runs, looked at again now and then: an installer ended by a logout says nothing more.
+        if (updating && !watching) {
+            watching = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 3, () => {
+                sync();
+                if (updating)
+                    return GLib.SOURCE_CONTINUE;
+                watching = 0;
+                return GLib.SOURCE_REMOVE;
+            });
+        }
+        if (updating) {
+            show(null, [], `Updating to Isle ${last.version}…`, 'Downloading and installing; Settings can be closed');
+        } else if (failed) {
+            // Before "installed": one that stopped half way may have put part of it in place.
+            update.label = 'Try Again';
+            const why = (last.done === null ? 'it was cut off before it finished' : updateFailure(last.text)).replace(/\.+$/, '');
+            show('dialog-warning-symbolic', ['warning'], 'Couldn’t update',
+                `${why[0].toUpperCase()}${why.slice(1)}. Or paste the command in a terminal`, [copy, update]);
+        } else if (installed && isNewer(installed, version)) {
+            // Installed, here or from a terminal: the shell runs the old one until the next login.
+            show('object-select-symbolic', ['success'], `Isle ${installed} is installed`,
+                'Log out and back in to finish', [logOutButton]);
+        } else if (!on) {
+            show('software-update-available-symbolic', ['dim-label'], 'Not checking for new versions',
+                'Turn it on below to hear when one is out');
+        } else if (newer && packaged) {
+            const arch = GLib.file_test('/etc/arch-release', GLib.FileTest.EXISTS);
+            show('software-update-available-symbolic', ['accent'], `Isle ${checked.latest} is out`, arch
+                ? 'In packaging/aur: git pull, then makepkg -si; then log out and back in'
+                : `Download its .${GLib.file_test('/etc/debian_version', GLib.FileTest.EXISTS) ? 'deb' : 'rpm'} and open it to install, then log out and back in`,
+            arch ? [how] : [how, download]);
+        } else if (newer) {
+            update.label = 'Update';
+            show('software-update-available-symbolic', ['accent'], `Isle ${checked.latest} is out`,
+                'Your tasks, events and settings stay', [update]);
+        } else if (checked?.at_ms) {
+            show('object-select-symbolic', ['success'], 'You’re up to date', `Checked ${checkedWhen(checked.at_ms)}`);
+        } else {
+            show('software-update-available-symbolic', ['dim-label'], 'Not checked yet', 'Isle asks GitHub once a day');
+        }
+    };
+    update.connect('clicked', () => {
+        const latest = readChecked()?.latest;
+        // Never two at once: one may still run from before Settings was opened again.
+        if (!latest || updating || readUpdateLog()?.running)
+            return;
+        try {
+            startUpdate(latest);
+        } catch (e) {
+            GLib.file_set_contents(UPDATE_LOG, `isle-update ${latest}\nIsle: ${e.message}\nisle-update-done 1\n`);
+        }
+        sync();
+    });
+    // isled writes updates.json after each look (switched on, or once a day), the installer its log as it
+    // goes: the row follows while open.
+    const monitors = [file, Gio.File.new_for_path(UPDATE_LOG)].map(watched => {
+        const monitor = watched.monitor_file(Gio.FileMonitorFlags.NONE, null);
+        monitor.connect('changed', () => sync());
+        return monitor;
+    });
     const changed = settings.connect('changed::check-updates', () => sync());
     window.connect('close-request', () => {
-        monitor.cancel();
+        monitors.forEach(monitor => monitor.cancel());
         settings.disconnect(changed);
+        if (watching)
+            GLib.Source.remove(watching);
+        watching = 0;
         return false;
     });
     sync();
     return [status, check];
 }
 
+/** Runs `isled --report` and puts what it says on the clipboard, saying so on `row`. */
 function copyReport(window, row) {
     const isled = findProgram('isled');
     if (!isled) {

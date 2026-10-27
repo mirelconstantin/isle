@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 // Synced lyrics: the sung line large and bright, the rest dimmer,
 // pauses as breathing dots. Click a line to jump there.
@@ -39,6 +40,7 @@ const STATES = {
 /** Three dots that breathe while the singing pauses. */
 const PauseDots = GObject.registerClass(
 class PauseDots extends St.BoxLayout {
+    /** Three still dots; they breathe once `breathing` is set and they are on screen. */
     _init(styleClass = 'isle-lyric-dots') {
         super._init({style_class: styleClass});
         this._dots = [0, 1, 2].map(() => {
@@ -52,6 +54,7 @@ class PauseDots extends St.BoxLayout {
         this.connect('notify::mapped', () => this._sync());
     }
 
+    /** True while this pause is the one sung and the music plays. */
     set breathing(breathing) {
         if (breathing === this._breathing)
             return;
@@ -59,6 +62,7 @@ class PauseDots extends St.BoxLayout {
         this._sync();
     }
 
+    /** Starts or stops the loop; never runs hidden or with animations off. */
     _sync() {
         const on = this._breathing && this.mapped && St.Settings.get().enable_animations;
         this._dots.forEach((dot, i) => {
@@ -81,8 +85,10 @@ class PauseDots extends St.BoxLayout {
     }
 });
 
+/** The lyrics page's view: the lines, or a state message when there are none. */
 export const LyricsPane = GObject.registerClass(
 class LyricsPane extends St.Widget {
+    /** Scroll view for the lines with a centred state message over it. */
     _init(page) {
         super._init({
             style_class: 'isle-lyrics',
@@ -146,6 +152,7 @@ class LyricsPane extends St.Widget {
         this.add_child(this._state);
     }
 
+    /** Catches up with isled's lyrics: rebuilt only for a new track or status. */
     update() {
         const {lyrics} = this._page.daemon.state;
         const status = lyrics?.status ?? 'none';
@@ -163,6 +170,7 @@ class LyricsPane extends St.Widget {
         this.syncPlaying();
     }
 
+    /** Shows one of STATES, or hides the message for null. */
     _showState(state) {
         this._state.visible = Boolean(state);
         this._stateDots.breathing = Boolean(state?.dots);
@@ -177,6 +185,7 @@ class LyricsPane extends St.Widget {
         this._stateHint.visible = Boolean(state.hint);
     }
 
+    /** Makes a row per line, all resting until `follow` picks the sung one. */
     _rebuild(lyrics) {
         this._column.destroy_all_children();
         this._synced = lyrics?.status === 'synced';
@@ -200,6 +209,7 @@ class LyricsPane extends St.Widget {
             this._page.markCold({force: true});
     }
 
+    /** A line's words, or pause dots for an empty synced line; synced rows seek on click. */
     _row(line) {
         const words = line.text.trim();
         let row;
@@ -287,6 +297,7 @@ class LyricsPane extends St.Widget {
         });
     }
 
+    /** Glides the view so line `index` sits at ANCHOR. */
     _scrollTo(index) {
         const target = this._rows[Math.max(index, 0)];
         if (!target || !this.mapped)

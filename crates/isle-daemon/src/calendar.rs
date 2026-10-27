@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 use isle_core::calendar::{AddError, Calendar};
 use zbus::object_server::SignalEmitter;
@@ -11,6 +12,7 @@ use crate::store::Store;
 /// Longest calendar or event id `MeetingLink` takes.
 const MAX_UID: usize = 1024;
 
+/// The D-Bus calendar: Isle's own events, saved to disk, plus meeting links of desktop events.
 pub struct CalendarService {
     calendar: Calendar,
     store: Store<Calendar>,
@@ -18,6 +20,7 @@ pub struct CalendarService {
 }
 
 impl CalendarService {
+    /// Loads the saved events, dropping past ones.
     pub fn load() -> Self {
         let mut store = Store::new("calendar");
         let mut calendar: Calendar = store.load();
@@ -31,10 +34,12 @@ impl CalendarService {
         }
     }
 
+    /// The events, for the assistant and the agenda.
     pub fn calendar(&self) -> &Calendar {
         &self.calendar
     }
 
+    /// Saves the events and tells the extension they changed.
     async fn changed(&self, emitter: &SignalEmitter<'_>) -> zbus::Result<()> {
         self.store.save(&self.calendar);
         self.events_changed(emitter).await
@@ -62,6 +67,7 @@ impl CalendarService {
         Ok(id)
     }
 
+    /// Deletes one of Isle's own events.
     async fn remove(
         &mut self,
         id: u64,

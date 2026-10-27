@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
+/* Copyright (C) 2026 zickrian */
 
 /* Isle. island.js draws the island black; this styles what sits on it (see docs/product-spec.md).
  * A dark palette: surfaces #1c1c1e #2c2c2e #3a3a3c; accents #30d158 #ff453a #0a84ff #ff9f0a #5e5ce6. */
@@ -118,6 +119,27 @@
 /* Closed island inside the top bar, like a notch: the bar is as tall as the island, so
  * maximised windows start below it. Comes after the compact bar's height so it wins. */
 #panel.isle-notch-bar { height: 32px; }
+
+/* Isle's bar is black or see-through in light and dark style alike: its text and icons stay white,
+ * as GNOME's light style has them over the overview (it makes them near-black otherwise). */
+#panel.isle-panel .panel-button { color: #ffffff; }
+#panel.isle-panel .panel-button:focus, #panel.isle-panel .panel-button:hover { box-shadow: inset 0 0 0 100px rgba(255, 255, 255, 0.17); }
+#panel.isle-panel .panel-button:active, #panel.isle-panel .panel-button:checked { box-shadow: inset 0 0 0 100px rgba(255, 255, 255, 0.28); }
+#panel.isle-panel .panel-button:active:hover, #panel.isle-panel .panel-button:checked:hover { box-shadow: inset 0 0 0 100px rgba(255, 255, 255, 0.32); }
+#panel.isle-panel .panel-button#panelActivities .workspace-dot { background-color: #ffffff; }
+/* Screen recording and sharing keep GNOME's own red and orange (its dark style's, as the bar is). */
+#panel.isle-panel .panel-button.screen-recording-indicator:focus,
+#panel.isle-panel .panel-button.screen-recording-indicator:hover { box-shadow: inset 0 0 0 100px #d61f2d; }
+#panel.isle-panel .panel-button.screen-recording-indicator:active,
+#panel.isle-panel .panel-button.screen-recording-indicator:checked { box-shadow: inset 0 0 0 100px #e02a37; }
+#panel.isle-panel .panel-button.screen-recording-indicator:active:hover,
+#panel.isle-panel .panel-button.screen-recording-indicator:checked:hover { box-shadow: inset 0 0 0 100px #e13340; }
+#panel.isle-panel .panel-button.screen-sharing-indicator:focus,
+#panel.isle-panel .panel-button.screen-sharing-indicator:hover { box-shadow: inset 0 0 0 100px #ff861a; }
+#panel.isle-panel .panel-button.screen-sharing-indicator:active,
+#panel.isle-panel .panel-button.screen-sharing-indicator:checked { box-shadow: inset 0 0 0 100px #ff902e; }
+#panel.isle-panel .panel-button.screen-sharing-indicator:active:hover,
+#panel.isle-panel .panel-button.screen-sharing-indicator:checked:hover { box-shadow: inset 0 0 0 100px #ff9638; }
 
 /* The glass bar has no colour, so its text and icons carry a soft shadow to
  * stay readable on a light wallpaper. */
@@ -380,8 +402,8 @@
 
 /* ── Expanded: frame ──────────────────────────────────── */
 
-/* The tabs' icons (inside their pills) and the settings icon line up with the pages' 28px edges. */
-.isle-header { padding: 0 24px 0 18px; }
+/* What shows lines up with the pages' 28px edges: the open tab's pill on the left, the settings icon on the right. */
+.isle-header { padding: 0 24px 0 28px; }
 .isle-header-clock { spacing: 8px; }
 
 /* Tabs to the pages: icons, with the open page's name in a lit pill. */
@@ -427,6 +449,8 @@
 
 /* Pages line up with the header's edges. */
 .isle-page { padding: 6px 28px 0 28px; }
+/* Its rows' insides on those edges: their hover background reaches 8px past them. */
+.isle-page.isle-notifications { padding: 6px 20px 0 20px; }
 
 /* ── Music ────────────────────────────────────────────── */
 
@@ -612,9 +636,8 @@
 
 /* ── Reminders ────────────────────────────────────────── */
 
-/* Reminders: an orange title and count (as large as the timer's caption beside
- * it), rows of a ring and a title over a hairline. A 24 px header and 24 px rows fill the 144 px page with five
- * whole rows, set close together. */
+/* Reminders: an orange title and count (as large as the timer's caption beside it), rows of a ring and a title
+ * over a hairline. A 24 px header and 24 px rows fit five whole rows in the 144 px page. */
 .isle-reminders-header { height: 24px; padding: 0; spacing: 4px; }
 .isle-reminders-title { font-size: 17px; font-weight: 600; color: #ff9f0a; letter-spacing: -0.2px; }
 .isle-reminders-count { font-size: 17px; font-weight: 600; letter-spacing: -0.2px; color: #ff9f0a; padding-right: 2px; }
@@ -729,7 +752,7 @@
 .isle-cal-dot.on-today { background-color: #ffffff; }
 
 /* The day's events. */
-.isle-cal-agenda { spacing: 6px; }
+.isle-cal-agenda { spacing: 5px; }
 .isle-cal-day-header { spacing: 8px; }
 .isle-cal-day-name { font-size: 14px; font-weight: 600; letter-spacing: -0.1px; }
 
@@ -745,7 +768,7 @@
 .isle-cal-today:hover { background-color: #3a3a3c; }
 .isle-cal-add { padding: 6px 12px; font-size: 13px; }
 .isle-cal-scroll { -st-vfade-offset: 14px; }
-.isle-cal-events { spacing: 4px; padding-bottom: 2px; }
+.isle-cal-events { spacing: 3px; padding-bottom: 2px; }
 
 /* An event: tinted in its calendar's colour (set
  * in calendar.js), with a bar of it down the side. */
@@ -759,6 +782,30 @@
 .isle-cal-event-bar { width: 3px; border-radius: 2px; margin: 4px 0 4px 5px; }
 .isle-cal-event-title { font-size: 13px; font-weight: 600; }
 .isle-cal-event-time { font-size: 11px; font-weight: 500; color: rgba(255, 255, 255, 0.65); }
+/* World clocks, in place of the events: as their rows, untinted. */
+.isle-cal-world-toggle { padding: 4px; border-radius: 999px; transition-duration: 120ms; }
+.isle-cal-world-toggle:hover { background-color: rgba(255, 255, 255, 0.1); }
+.isle-cal-world-toggle:checked { background-color: rgba(255, 255, 255, 0.18); }
+.isle-cal-world-row {
+  spacing: 8px;
+  padding: 0 10px;
+  min-height: 26px;
+  border-radius: 7px;
+  background-color: rgba(255, 255, 255, 0.07);
+}
+.isle-cal-world-city { font-size: 13px; font-weight: 600; }
+.isle-cal-world-meta { font-size: 11px; font-weight: 500; color: rgba(255, 255, 255, 0.55); }
+.isle-cal-world-time { font-size: 13px; font-weight: 600; font-feature-settings: "tnum"; }
+.isle-cal-world-strip {
+  padding: 3px 2px 0 2px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  transition-duration: 120ms;
+}
+.isle-cal-world-strip:hover .isle-cal-world-chip-city { color: rgba(255, 255, 255, 0.8); }
+.isle-cal-world-strip-box { spacing: 14px; }
+.isle-cal-world-chip { spacing: 5px; }
+.isle-cal-world-chip-city { font-size: 11px; font-weight: 500; color: rgba(255, 255, 255, 0.55); }
+.isle-cal-world-chip-time { font-size: 11px; font-weight: 600; font-feature-settings: "tnum"; }
 .isle-cal-empty { font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, 0.55); }
 .isle-cal-accounts { font-size: 12px; color: rgba(10, 132, 255, 1); padding: 4px 8px; border-radius: 8px; }
 .isle-cal-accounts:hover { background-color: rgba(255, 255, 255, 0.08); }

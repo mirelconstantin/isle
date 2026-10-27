@@ -58,7 +58,7 @@ Rest the pointer on it to open it.
 Everything else works without it. To ask the island things out loud with
 Super+I:
 
-1. Install and sign in to one of Claude Code, Codex or Antigravity (the
+1. Install and sign in to one of Claude Code, Codex, Grok or Antigravity (the
    [README](../README.md#voice-assistant) says how; each uses your own plan).
 2. Set up speech recognition once, in a terminal. It downloads the speech
    model picked in Settings → Assistant (`small`, 265 MB, by default; or name
@@ -98,22 +98,30 @@ installers, and takes what your login shell sets for them
 
 ## Updating
 
-Run the same command again; it installs the newest release over the old one
-and keeps your tasks, calendar events, clipboard history and settings (the
-top bar look you picked included). Log out and back in afterwards.
+Isle tells you in the island when a new version is out.
+
+1. Click **Update** in that alert, or open Isle's Settings → **About**.
+2. Click **Update**. It takes a few seconds; no password is needed, and you
+   can close Settings meanwhile.
+3. Click **Log Out** and log back in.
+
+Your tasks, calendar events, clipboard history and settings stay.
+
+**Isle 1.3 or older**, or the button didn't work? Paste this in a terminal,
+press Enter, then log out and back in:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/zickrian/isle/main/get.sh | bash
 ```
 
-To install a particular version instead, put `ISLE_VERSION` before `bash`:
-`… | ISLE_VERSION=1.0.5 bash`.
+**Installed from a package?** Update it the way you installed it: download
+the new `.deb` or `.rpm` from [Releases](https://github.com/zickrian/isle/releases/latest)
+and open it, or on Arch run `git pull` and `makepkg -si` again in
+`packaging/aur`. Then log out and back in. Don't also run the command above: it would add a second copy (see
+[below](#both-a-package-and-the-one-line-install)).
 
-Installed from a package instead? Download the new release's `.deb` or
-`.rpm` and install it the same way as the first one, or run `makepkg -si`
-again with the updated `PKGBUILD` on Arch; then log out and back in. Don't
-run the command above as well: it would add a second copy in your home
-folder (see [below](#both-a-package-and-the-one-line-install)).
+To install a particular version, put `ISLE_VERSION` before `bash`:
+`… | ISLE_VERSION=1.0.5 bash`.
 
 ## Uninstalling
 

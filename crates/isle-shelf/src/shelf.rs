@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 //! The see-through shelf window: the files' tiles and the drop zone; isled owns the list.
 
@@ -42,9 +43,11 @@ pub struct Item {
     pub name: String,
 }
 
+/// The shelf window; clones share it.
 #[derive(Clone)]
 pub struct ShelfWindow(Rc<Inner>);
 
+/// The widgets and the state behind the window.
 struct Inner {
     window: gtk::Window,
     stack: gtk::Stack,
@@ -73,6 +76,7 @@ struct Inner {
 }
 
 impl ShelfWindow {
+    /// Builds the window, takes drops and connects to isled; shown only once the extension asks.
     pub fn new(app: &gtk::Application) -> Self {
         let window = gtk::Window::builder()
             .application(app)
@@ -182,6 +186,7 @@ impl ShelfWindow {
         self.limit_input();
     }
 
+    /// Insets the files' area within the window.
     fn set_margins(
         &self,
         (x, y, width, height): (i32, i32, i32, i32),
@@ -208,6 +213,7 @@ impl ShelfWindow {
         }
     }
 
+    /// Sizes and shows the window at the given screen rectangle.
     fn place_window(&self, (x, y, width, height): (i32, i32, i32, i32)) {
         if let Some(quit) = self.0.idle_quit.take() {
             quit.remove();
@@ -226,6 +232,7 @@ impl ShelfWindow {
         }
     }
 
+    /// Moves the X window where the extension wants it.
     fn place(&self) {
         let Some((x, y, width, height)) = self.0.area.get() else {
             return;
@@ -250,6 +257,7 @@ impl ShelfWindow {
         }
     }
 
+    /// Hides the window; the helper quits if it stays hidden for `IDLE_QUIT_SECS`.
     pub fn hide(&self) {
         self.0.window.set_visible(false);
         if self.0.idle_quit.borrow().is_some() {
@@ -301,6 +309,7 @@ impl ShelfWindow {
         (fresh > 0 && items.len() + fresh > CAPACITY).then_some(Refusal::NoRoom)
     }
 
+    /// No action for a tile dragged out of here, or for files that can't land.
     fn accepts(&self, target: &gtk::DropTarget) -> gdk::DragAction {
         if dragged_from_here(target) || self.refusal().is_some() {
             gdk::DragAction::empty()
@@ -395,6 +404,7 @@ impl ShelfWindow {
         self.0.window.add_controller(target);
     }
 
+    /// Flashes the drop area as a file lands.
     fn flash_landed(&self) {
         let stack = &self.0.stack;
         stack.remove_css_class("landed");
@@ -407,6 +417,7 @@ impl ShelfWindow {
         });
     }
 
+    /// Follows isled's list of shelf files, redrawing as it changes.
     fn connect_daemon(&self) {
         let weak = Rc::downgrade(&self.0);
         gio::DBusProxy::for_bus(
@@ -449,6 +460,7 @@ impl ShelfWindow {
         );
     }
 
+    /// Calls a method on isled's shelf; a failure is only logged.
     fn call(&self, method: &str, args: Option<&glib::Variant>) {
         let Some(proxy) = self.0.daemon.borrow().clone() else {
             return;
@@ -468,6 +480,7 @@ impl ShelfWindow {
         );
     }
 
+    /// The drop area's look and words for the current drag.
     fn render(&self) {
         let inner = &self.0;
         let count = inner.items.borrow().len();
@@ -556,6 +569,7 @@ fn dragged_from_here(target: &gtk::DropTarget) -> bool {
     target.current_drop().and_then(|drop| drop.drag()).is_some()
 }
 
+/// Adds or removes a CSS class.
 fn set_class(widget: &impl IsA<gtk::Widget>, class: &str, on: bool) {
     if on {
         widget.add_css_class(class);
@@ -596,6 +610,7 @@ fn shelf_icon(size: i32) -> gtk::Image {
     image
 }
 
+/// The icon, title and hint shown when the shelf has no files.
 fn empty_state(title: &gtk::Label, hint: &gtk::Label) -> gtk::Box {
     let box_ = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)

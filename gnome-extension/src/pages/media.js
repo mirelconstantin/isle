@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 // Now playing: cover on the left; title, artist, scrubber and controls beside it.
 // With lyrics on, a wider island with synced lyrics on the right. See docs/product-spec.md, section 5.
@@ -25,8 +26,10 @@ const PROGRESS_REFRESH_MS = 250;
 /** The music bars' opacity while the song is paused, as on the closed island. */
 const PAUSED_BARS_OPACITY = 110;
 
+/** The music page: the player, with lyrics or volume and outputs as its other modes. */
 export const MediaPage = GObject.registerClass(
 class MediaPage extends Page {
+    /** Builds all three layouts up front; only the mode's is shown. */
     _init(daemon, audio, {height}) {
         super._init(daemon, {
             style_class: 'isle-page isle-media',
@@ -59,6 +62,8 @@ class MediaPage extends Page {
         fence(this);
 
         this.watch(['nowPlaying', 'lyrics'], () => this._update());
+        // Left out of the island, it follows the songs again once it is back.
+        this.connect('availability-changed', () => !this.hidden && this._update());
         this.watch(['players'], () => this._syncPlayers());
         this._audioIds = [
             audio.connect('changed', () => this._updateVolume()),
@@ -70,14 +75,17 @@ class MediaPage extends Page {
         this.connect('destroy', () => this._onDestroy());
     }
 
+    /** A track, playing or paused. */
     get relevant() {
         return Playback.hasTrack(this.daemon.state.nowPlaying);
     }
 
+    /** Wider only with the lyrics open. */
     get preferredWidth() {
         return this._shown('lyrics') ? px(LYRICS_WIDTH) : null;
     }
 
+    /** The cover's colour, behind the lyrics only. */
     get tint() {
         return this._shown('lyrics') ? this._tint : null;
     }
@@ -127,6 +135,7 @@ class MediaPage extends Page {
         return box;
     }
 
+    /** Title over artist, each cut short with an ellipsis. */
     _texts(titleClass, artistClass) {
         const box = new St.BoxLayout({...VERTICAL, x_expand: true, y_align: Clutter.ActorAlign.CENTER, style_class: 'isle-player-texts'});
         const title = label('', titleClass);
@@ -140,6 +149,7 @@ class MediaPage extends Page {
         return box;
     }
 
+    /** Elapsed time, scrubber and time left; letting go of the scrubber seeks. */
     _progress() {
         const row = new St.BoxLayout({style_class: 'isle-player-progress'});
         const elapsed = label('0:00', 'isle-time');
@@ -159,6 +169,7 @@ class MediaPage extends Page {
         return row;
     }
 
+    /** Previous, play or pause, and next. */
     _transport() {
         const row = new St.BoxLayout({style_class: 'isle-transport', y_align: Clutter.ActorAlign.CENTER});
         const play = iconButton('isle-play-symbolic', 'isle-button-flat isle-play',
@@ -182,6 +193,7 @@ class MediaPage extends Page {
 
     // Layouts.
 
+    /** The standard view: cover beside title, mode buttons, progress and controls. */
     _buildPlayer() {
         const player = new St.BoxLayout({style_class: 'isle-player', x_expand: true, y_expand: true});
         player.add_child(this._art(ART_SIZE, 16));
@@ -204,6 +216,8 @@ class MediaPage extends Page {
         modes.add_child(this._playerSwitch);
         modes.add_child(this._modeButton('lyrics', 'isle-lyrics', 'Show lyrics', false));
         modes.add_child(this._modeButton('audio', 'isle-output', 'Volume and output', false));
+        // The last icon on the page's right edge, as the header's settings; its padding hangs past it.
+        onUiScale(modes, scale => (modes.translation_x = 5 * scale));
         head.add_child(modes);
         column.add_child(head);
         column.add_child(this._progress());
@@ -278,6 +292,7 @@ class MediaPage extends Page {
         return layout;
     }
 
+    /** Shown when no player has a track. */
     _buildEmpty() {
         const box = new St.BoxLayout({
             ...VERTICAL,
@@ -291,6 +306,7 @@ class MediaPage extends Page {
         return box;
     }
 
+    /** Opens `mode`, or goes back to the player if it is open already. */
     _toggleMode(mode) {
         this._mode = this._mode === mode ? 'player' : mode;
         this._update();
@@ -306,6 +322,7 @@ class MediaPage extends Page {
         this._audioLayout.show();
     }
 
+    /** Hides again whatever the mode doesn't show. */
     coolDown() {
         this._syncMode();
     }
@@ -320,7 +337,11 @@ class MediaPage extends Page {
         return hasTrack;
     }
 
+    /** Fills every layout from `nowPlaying`. */
     _update() {
+        // Left out in Settings: no covers loaded or tinted for a page that can't be shown.
+        if (this.hidden)
+            return;
         const {nowPlaying} = this.daemon.state;
         if (!this._syncMode())
             return;
@@ -381,6 +402,7 @@ class MediaPage extends Page {
         }
     }
 
+    /** Mute icon, slider and percentage, from the default output. */
     _updateVolume() {
         const audio = this._audio;
         setButtonIcon(this._muteButton, audio.iconName);
@@ -388,6 +410,7 @@ class MediaPage extends Page {
         this._volumeText.text = audio.muted ? 'Muted' : `${Math.round(audio.volume * 100)}%`;
     }
 
+    /** One row per output, the current one checked; a click switches to it. */
     _updateOutputs() {
         const audio = this._audio;
         const outputs = audio.outputs;
@@ -423,6 +446,7 @@ class MediaPage extends Page {
             this.markCold({force: true});
     }
 
+    /** Takes the lyrics' tint from the cover at `path`, once per cover. */
     _updateTint(path) {
         // A player may write the next song's cover under the same name: its time tells them apart.
         const key = coverKey(path);
@@ -439,6 +463,7 @@ class MediaPage extends Page {
         });
     }
 
+    /** Moves the times and scrubbers, and again shortly while playing on an open page. */
     _tickProgress() {
         const {nowPlaying} = this.daemon.state;
         if (!Playback.hasTrack(nowPlaying))
@@ -466,12 +491,14 @@ class MediaPage extends Page {
             this._lyricsBars.ease({opacity, duration: 200});
     }
 
+    /** Starts the bars, the clock and the lyrics' scrolling. */
     onActivate() {
         this._syncBars();
         this._tickProgress();
         this._lyricsPane.follow();
     }
 
+    /** Stops the bars and leaves the audio view. */
     onDeactivate() {
         this._lyricsBars.playing = false;
         // Reopening the island starts on the player, not a sub-view.
@@ -479,6 +506,7 @@ class MediaPage extends Page {
             this._toggleMode('audio');
     }
 
+    /** Stops listening to the audio outputs. */
     _onDestroy() {
         this._audioIds.forEach(id => this._audio.disconnect(id));
     }

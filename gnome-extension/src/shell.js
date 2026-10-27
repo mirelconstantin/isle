@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 // Integration with GNOME Shell itself: the top bar, the volume/brightness
 // OSD and keyboard state. Everything here is undone in `destroy()`.
@@ -10,15 +11,16 @@ import * as Signals from 'resource:///org/gnome/shell/misc/signals.js';
 
 import {clutterBackend} from './compat.js';
 
-// Isle's top bar colour per `top-bar-style`, added to the bar's inline style so other extensions keep
-// theirs, and re-added when one replaces it (Blur my Shell does). Glass has no colour of its own.
+// The bar's colour (glass 0% to black 100%) joins its inline style, re-added if another extension replaces it.
 /** More changes of the bar's style than this in a second are a fight with another extension. */
 const MAX_RESTYLES_PER_SECOND = 5;
 
-const BAR_STYLES = {
-    black: 'background-color: #000000;',
-    glass: 'background-color: transparent;',
-};
+/** Isle's own colour rules for the bar, as `_barRule` writes them, to take out again. */
+const BAR_RULE = /background-color: (?:transparent|#000000|rgba\(0, 0, 0, [\d.]+\));/g;
+/** Below this opacity (%) the bar's text needs its shadow to read on the wallpaper. */
+const SHADOW_BELOW = 50;
+/** Style class keeping the bar's text white in GNOME's light style too. */
+const BAR_CLASS = 'isle-panel';
 /** Style class giving the glass bar's text a shadow to read on any wallpaper. */
 const GLASS_BAR_CLASS = 'isle-glass-bar';
 /** Style class making the top bar slimmer; see stylesheet.css. */
@@ -29,6 +31,7 @@ const NOTCH_BAR_CLASS = 'isle-notch-bar';
 // Restyles the top bar around the island (black or glass) and hides the clock and its calendar menu.
 // Signals: `height-changed`, `style-changed` (`blendsIn` may have changed), `calendar-requested` (Super+V).
 export class TopBar extends Signals.EventEmitter {
+    /** Hides the clock at once; Super+V comes to Isle unless Settings leaves it to GNOME. */
     constructor(settings) {
         super();
         this._settings = settings;
@@ -38,11 +41,14 @@ export class TopBar extends Signals.EventEmitter {
         this._dateMenu.reactive = false;
 
         this._settingsChanged = [
-            settings.connect('changed::top-bar-style', () => {
+            ...['top-bar-style', 'top-bar-opacity'].map(key => settings.connect(`changed::${key}`, () => {
                 this._yielded = false;
+                const blended = this._blended;
                 this._applyStyle();
-                this.emit('style-changed');
-            }),
+                // Only black all the way changes where the island sits; the shades between just restyle the bar.
+                if (this.blendsIn !== blended)
+                    this.emit('style-changed');
+            })),
             settings.connect('changed::compact-top-bar', () => this._applyStyle()),
             settings.connect('changed::island-in-top-bar', () => this._applyStyle()),
         ];
@@ -54,19 +60,27 @@ export class TopBar extends Signals.EventEmitter {
         // The calendar shortcut opens the island instead, and the hidden clock's menu is closed again
         // should anything else open it; unless Super+V is left to GNOME (Settings).
         this._superVChanged = settings.connect('changed::super-v', () => this._syncCalendar());
+        this._pagesChanged = settings.connect('changed::hidden-pages', () => this._syncCalendar());
         this._syncCalendar();
         this._menuChanged = this._dateMenu.menu.connect('open-state-changed', (menu, open) => {
-            if (open && !this._clockShown && this._settings.get_string('super-v') === 'isle')
+            if (open && !this._clockShown && this._superVIsIsle)
                 menu.close();
         });
     }
 
+    /** In stage pixels; it changes with the compact and notch styles. */
     get height() {
         return Main.panel.height;
     }
 
+    /** Super+V opens Isle's clipboard, unless left to GNOME or the Shelf page is left out. */
+    get _superVIsIsle() {
+        return this._settings.get_string('super-v') === 'isle' && !this._settings.get_strv('hidden-pages').includes('shelf');
+    }
+
+    /** Takes the calendar shortcut over, or gives it back, as the settings now say. */
     _syncCalendar() {
-        if (this._settings.get_string('super-v') !== 'isle') {
+        if (!this._superVIsIsle) {
             this._restoreToggle();
         } else if (Main.panel.toggleCalendar !== this._toggle) {
             // Another extension's own, put back when Isle stops (GNOME's is the prototype's).
@@ -85,9 +99,16 @@ export class TopBar extends Signals.EventEmitter {
             delete Main.panel.toggleCalendar;
     }
 
+    /** The bar's opacity in %: Settings' slider, else as the older Glass (0) or Black (100) choice says. */
+    get opacity() {
+        if (this._settings.get_user_value('top-bar-opacity'))
+            return this._settings.get_int('top-bar-opacity');
+        return this._settings.get_string('top-bar-style') === 'black' ? 100 : 0;
+    }
+
     /** Whether the bar is as black as the island; otherwise the island hangs from the screen's top edge. */
     get blendsIn() {
-        return this._settings.get_string('top-bar-style') === 'black';
+        return this.opacity >= 100;
     }
 
     /** Keeps the top bar's centre clear for the island. */
@@ -102,24 +123,28 @@ export class TopBar extends Signals.EventEmitter {
         this._dateMenu.reactive = shown;
         if (shown)
             this._dateMenu.set_width(-1);
-        else if (this._settings.get_string('super-v') === 'isle')
+        else if (this._superVIsIsle)
             this._dateMenu.menu.close();
     }
 
+    /** Colour and style classes from the settings; remembers `blendsIn` to spot a change. */
     _applyStyle() {
+        this._blended = this.blendsIn;
         this._syncColor();
         // The bar's height changes with these; `height-changed` re-lays out the island.
         setStyleClasses(Main.panel, {
+            [BAR_CLASS]: true,
             [COMPACT_BAR_CLASS]: this._settings.get_boolean('compact-top-bar'),
             [NOTCH_BAR_CLASS]: this._settings.get_boolean('island-in-top-bar'),
-            [GLASS_BAR_CLASS]: this._settings.get_string('top-bar-style') === 'glass',
+            [GLASS_BAR_CLASS]: this.opacity < SHADOW_BELOW,
         });
     }
 
     // Another extension that sets the bar's style too would undo Isle's rule each time Isle set it, in a
     // loop that keeps the shell busy: past a few times a second, Isle gives way until the setting changes.
     _onPanelStyle() {
-        if (this._yielded)
+        // Isle's own write, or one that kept Isle's colour: no fight.
+        if (this._yielded || this._writing || this._wantedStyle() === (Main.panel.get_style() ?? ''))
             return;
         const now = GLib.get_monotonic_time();
         this._restyles = (this._restyles ?? []).filter(at => now - at < 1e6);
@@ -132,18 +157,37 @@ export class TopBar extends Signals.EventEmitter {
         this._syncColor();
     }
 
-    /** Sets Isle's colour rule, leaving the rest of the style alone. */
-    _syncColor(barStyle = this._settings.get_string('top-bar-style')) {
-        const style = Main.panel.get_style() ?? '';
-        const others = Object.values(BAR_STYLES)
-            .reduce((rest, rule) => rest.replace(rule, ''), style).trim();
-        const rule = BAR_STYLES[barStyle];
-        const wanted = rule ? `${others} ${rule}`.trim() : others;
-        // Setting it notifies again, and then nothing changes.
-        if (wanted !== style)
-            Main.panel.set_style(wanted || null);
+    /** Black at `opacity` %, as an inline rule; null for none (the theme's colour). */
+    _barRule(opacity) {
+        if (opacity === null)
+            return null;
+        if (opacity <= 0)
+            return 'background-color: transparent;';
+        return opacity >= 100 ? 'background-color: #000000;' : `background-color: rgba(0, 0, 0, ${opacity / 100});`;
     }
 
+    /** The bar's style with Isle's colour rule at `opacity`, the rest of it left alone. */
+    _wantedStyle(opacity = this.opacity) {
+        const others = (Main.panel.get_style() ?? '').replace(BAR_RULE, '').trim();
+        const rule = this._barRule(opacity);
+        return rule ? `${others} ${rule}`.trim() : others;
+    }
+
+    /** Sets Isle's colour rule, leaving the rest of the style alone. */
+    _syncColor(opacity = this.opacity) {
+        const wanted = this._wantedStyle(opacity);
+        if (wanted === (Main.panel.get_style() ?? ''))
+            return;
+        // It notifies at once: not counted as another extension's change (see `_onPanelStyle`).
+        this._writing = true;
+        try {
+            Main.panel.set_style(wanted || null);
+        } finally {
+            this._writing = false;
+        }
+    }
+
+    /** Gives the bar, clock and calendar shortcut back as GNOME had them. */
     destroy() {
         // Tell no one about changes made while tearing down.
         this.disconnectAll();
@@ -152,12 +196,13 @@ export class TopBar extends Signals.EventEmitter {
         Main.panel.disconnect(this._styleChanged);
         this._dateMenu.menu.disconnect(this._menuChanged);
         this._settings.disconnect(this._superVChanged);
+        this._settings.disconnect(this._pagesChanged);
         this._restoreToggle();
 
         // No colour of Isle's: the theme's again.
         this._syncColor(null);
         setStyleClasses(Main.panel, {
-            [COMPACT_BAR_CLASS]: false, [NOTCH_BAR_CLASS]: false, [GLASS_BAR_CLASS]: false,
+            [BAR_CLASS]: false, [COMPACT_BAR_CLASS]: false, [NOTCH_BAR_CLASS]: false, [GLASS_BAR_CLASS]: false,
         });
         this._dateMenu.set_width(-1);
         this._dateMenu.opacity = 255;
@@ -177,6 +222,7 @@ function setStyleClasses(actor, classes) {
 // Routes GNOME's volume and brightness OSDs to `handler`; if it returns false, GNOME shows its own.
 // GNOME 46–48: `show(monitorIndex, icon, label, level, maxLevel)`; 49: `show(icon, label, levels)`, plus `showAll()`.
 export class OsdHook {
+    /** Wraps whichever of `show` and `showAll` this GNOME has. */
     constructor(handler) {
         const manager = Main.osdWindowManager;
         this._manager = manager;
@@ -214,6 +260,7 @@ export class OsdHook {
         });
     }
 
+    /** Stops handling; GNOME shows its own OSD again. */
     destroy() {
         this._destroyed = true;
         // Only undo our own overrides; another extension may have wrapped
@@ -231,6 +278,7 @@ export class OsdHook {
 
 /** Emits `caps-lock` (on) when Caps Lock is turned on or off. */
 export class KeyboardWatcher extends Signals.EventEmitter {
+    /** Starts from the current state, so only a change is emitted. */
     constructor() {
         super();
         this._keymap = clutterBackend().get_default_seat().get_keymap();
@@ -244,6 +292,7 @@ export class KeyboardWatcher extends Signals.EventEmitter {
         });
     }
 
+    /** Stops watching the keymap. */
     destroy() {
         // Tell no one about changes made while tearing down.
         this.disconnectAll();

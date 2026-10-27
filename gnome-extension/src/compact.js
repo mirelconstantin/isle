@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
-// The resting island: the clock flanked by live activities (recording, call or timer
-// left, music right, privacy dots far right), a moon before it during Do Not Disturb.
-// A paused song keeps its cover. A second activity takes the right side: the timer's
-// or a call's time, or the music bars.
+// The resting island: the clock between live activities (recording, call, music or timer on the left, privacy
+// dots far right), a moon before it in Do Not Disturb. A second activity takes the right side.
 
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
@@ -38,9 +37,11 @@ export function timerColor(phase) {
     return phase === 'focus' || phase === 'idle' ? Palette.WHITE : Palette.GREEN;
 }
 
+/** The closed island's contents; emits `width-changed` when it needs another width. */
 export const CompactView = GObject.registerClass({
     Signals: {'width-changed': {}},
 }, class CompactView extends St.Widget {
+    /** `privacy` and `call` are the shell's recording and call watchers. */
     _init(daemon, settings, privacy, call) {
         super._init({
             style_class: 'isle-compact',
@@ -125,6 +126,7 @@ export const CompactView = GObject.registerClass({
                 this._refresh();
         });
         this._settingsChanged = settings.connect('changed::privacy-indicators', () => this._refresh());
+        this._pagesChanged = settings.connect('changed::hidden-pages', () => this._refresh());
         this._privacyChanged = privacy.connect('changed', () => this._refresh());
         this._callChanged = call.connect('changed', () => this._refresh());
         // Music bars only dance, and the times and the timer's ring only tick, while this view is on screen.
@@ -156,6 +158,7 @@ export const CompactView = GObject.registerClass({
         return px(this._left.child || this._right.child ? size.activities : size.clock + moon) + privacy + 2 * this._secondExtra;
     }
 
+    /** A sign with a time label beside it, for the right side's second activity. */
     _secondPart(sign, styleClass) {
         const box = new St.BoxLayout({style_class: styleClass, y_align: Clutter.ActorAlign.CENTER});
         box.add_child(sign);
@@ -174,6 +177,7 @@ export const CompactView = GObject.registerClass({
         return 2 * Math.ceil(dots + spacing);
     }
 
+    /** Privacy dots are on in Settings and something is using the camera, microphone or screen. */
     _showingPrivacy() {
         return this._settings.get_boolean('privacy-indicators') && this._privacy.any;
     }
@@ -202,6 +206,7 @@ export const CompactView = GObject.registerClass({
         return Boolean(this._isServiceDown);
     }
 
+    /** Set by the controller's service watch. */
     set serviceDown(down) {
         if (down === Boolean(this._isServiceDown))
             return;
@@ -235,22 +240,23 @@ export const CompactView = GObject.registerClass({
         this._refresh();
     }
 
-    /** While the user is away the music bars rest; nobody is watching them. */
-    /** Whether the user is away (no input for a while); the bars rest meanwhile. */
+    /** Whether the user is away (no input for a while); the bars rest meanwhile, nobody is watching. */
     get idle() {
         return this._idle;
     }
 
+    /** Starts or rests the bars. */
     set idle(idle) {
         this._idle = idle;
         this._syncBars();
     }
 
+    /** Picks what each side shows, and emits `width-changed` when the island needs another width. */
     _refresh() {
         const {nowPlaying, pomodoro} = this._daemon.state;
         const playing = Playback.isPlaying(nowPlaying);
-        // A paused song stays until its player closes.
-        const hasTrack = Playback.hasTrack(nowPlaying);
+        // A paused song stays until its player closes; none with the Music page left out.
+        const hasTrack = Playback.hasTrack(nowPlaying) && !this._settings.get_strv('hidden-pages').includes('music');
         const timerActive = pomodoro && pomodoro.phase !== 'idle';
         const recording = this._privacy.recording;
         const onCall = this._call.active;
@@ -408,6 +414,7 @@ export const CompactView = GObject.registerClass({
             this._cancel('second');
     }
 
+    /** The timer ring's progress, redrawn every few seconds while it shows. */
     _refreshRing() {
         const {pomodoro} = this._daemon.state;
         // Only while it shows: the timer may be on the right instead.
@@ -423,6 +430,7 @@ export const CompactView = GObject.registerClass({
             this._later('ring', RING_REFRESH_S * 1000, () => this._refreshRing());
     }
 
+    /** Bars dance only when on screen, the user is here and the song plays. */
     _syncBars() {
         const playing = this.mapped && !this._idle && Playback.isPlaying(this._daemon.state.nowPlaying);
         this._bars.playing = playing;
@@ -451,11 +459,12 @@ export const CompactView = GObject.registerClass({
         this._later('call', 1000 - (elapsedMs % 1000) + 10, () => this._tickCall());
     }
 
-    /** Updates the clock, then sleeps until the minute changes. */
+    /** Sets the clock's text; `watchClock` calls it again as the minute changes. */
     _tickClock() {
         this._clock.text = Format.clockTime();
     }
 
+    /** Runs `callback` once after `ms`, replacing any timeout of the same name. */
     _later(name, ms, callback) {
         this._cancel(name);
         this._timeouts[name] = GLib.timeout_add(GLib.PRIORITY_DEFAULT, Math.max(0, Math.round(ms)), () => {
@@ -465,6 +474,7 @@ export const CompactView = GObject.registerClass({
         });
     }
 
+    /** Drops the timeout of that name, if any. */
     _cancel(name) {
         if (this._timeouts[name]) {
             GLib.source_remove(this._timeouts[name]);
@@ -478,12 +488,14 @@ export const CompactView = GObject.registerClass({
             palette: paletteFor(this._settings.get_string('bot-color'), this._settings.get_string('bot-glow'))};
     }
 
+    /** Stops timers and signals, and destroys the signs not in a slot right now. */
     _onDestroy() {
         this._stopClock();
         for (const name of Object.keys(this._timeouts))
             this._cancel(name);
         this._daemon.disconnect(this._daemonChanged);
         this._settings.disconnect(this._settingsChanged);
+        this._settings.disconnect(this._pagesChanged);
         for (const id of this._botLookChanged)
             this._settings.disconnect(id);
         this._privacy.disconnect(this._privacyChanged);

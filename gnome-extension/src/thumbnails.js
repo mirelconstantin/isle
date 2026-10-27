@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 // Square previews and colours for shelf files, decoded on a worker thread and
 // cached as small PNGs in ~/.cache/isle/shelf.
@@ -27,7 +28,9 @@ function call(begin, finish) {
     });
 }
 
+/** The shelf's previews, each file loaded once and shared by every tile showing it. */
 export class Thumbnails {
+    /** Nothing is read until a tile asks. */
     constructor() {
         this._dir = GLib.build_filenamev([GLib.get_user_cache_dir(), 'isle', 'shelf']);
         /** uri → Promise of what `get` returns. */
@@ -64,15 +67,18 @@ export class Thumbnails {
         }, this._cancellable);
     }
 
+    /** Cancels the loads still running. */
     destroy() {
         this._cancellable.cancel();
         this._loads.clear();
     }
 
+    /** File name of a preview: the uri's MD5, as the desktop's own thumbnails do. */
     _previewName(uri) {
         return `${GLib.compute_checksum_for_string(GLib.ChecksumType.MD5, uri, -1)}.png`;
     }
 
+    /** Looks the file up and makes its preview, from the cache when still fresh. */
     async _load(uri) {
         const file = Gio.File.new_for_uri(uri);
         const info = await call(

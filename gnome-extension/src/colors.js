@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 // Colours to wash the island in: picked from a picture (a song's cover, a
 // file on the shelf) or, for a file without one, from its type.

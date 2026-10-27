@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 //! Meeting links of the desktop's calendar events (Google Meet, Zoom, Teams, Webex), read from Evolution
 //! Data Server, where GNOME Shell's calendar gets them, so the island can offer to join.
@@ -59,12 +60,14 @@ impl MeetingLinks {
         }
     }
 
+    /// A link looked up within the last six hours.
     fn cached(&self, key: &Key, now: Instant) -> Option<String> {
         let found = self.found.lock().unwrap_or_else(PoisonError::into_inner);
         let (at, link) = found.get(key)?;
         (now.duration_since(*at) < KEEP).then(|| link.clone())
     }
 
+    /// Keeps a found link, making room by dropping stale ones, then the oldest.
     fn remember(&self, key: Key, link: String, now: Instant) {
         let mut found = self.found.lock().unwrap_or_else(PoisonError::into_inner);
         if found.len() >= CACHED && !found.contains_key(&key) {

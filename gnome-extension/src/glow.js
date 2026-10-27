@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 // The assistant's light, with Cairo only so Settings can show it too: light rising from a shape's edge,
 // brightest along the bottom and gone by the top of the sides, its colours flowing round.
@@ -7,9 +8,8 @@ import Cairo from 'cairo';
 
 const STOPS = 24;
 
-// Light from the edge inside a box (`left`, `right`, `top`, corner `radius`) `height` tall.
-// `time` (s) moves it, `level` (0..1, the voice) swells it, `strength` fades it in and out; `cache`
-// keeps the rising mask while the box's height stays. `scale` sizes its strokes: the shell's `uiScale`.
+// Light from the edge of a box `height` tall: `time` (s) moves it, `level` (0..1, the voice) swells it,
+// `strength` fades it; `cache` keeps the rising mask while the height stays, `scale` is the shell's `uiScale`.
 export function paintRim(cr, {left, right, top, radius}, height, colors, {time, level}, strength, cache = {}, scale = 1) {
     const r = Math.max(0, radius);
     const sides = () => traceSides(cr, left, right, top, height, r);

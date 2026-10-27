@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 //! Pomodoro timer: focus sessions, short breaks, and a long break every few sessions.
 //! Times are epoch milliseconds passed in by the caller, so the logic stays deterministic.
@@ -7,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 const MINUTE_MS: i64 = 60_000;
 
+/// Where the timer is in the cycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Phase {
@@ -17,6 +19,7 @@ pub enum Phase {
     LongBreak,
 }
 
+/// Phase lengths and what starts on its own; saved apart from the timer.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PomodoroConfig {
@@ -31,6 +34,7 @@ pub struct PomodoroConfig {
 }
 
 impl Default for PomodoroConfig {
+    /// The classic 25/5/15, a long break after four sessions.
     fn default() -> Self {
         Self {
             focus_minutes: 25,
@@ -44,6 +48,7 @@ impl Default for PomodoroConfig {
 }
 
 impl PomodoroConfig {
+    /// A phase's length; at least a minute, so a zero in the config can't end it at once.
     fn duration_ms(&self, phase: Phase) -> i64 {
         let minutes = match phase {
             Phase::Idle => 0,
@@ -90,6 +95,7 @@ pub struct TimerState {
     pub completed_sessions: u32,
 }
 
+/// The timer itself. Pure: the caller passes the time and acts on the transitions.
 #[derive(Debug, Clone, Default)]
 pub struct Pomodoro {
     config: PomodoroConfig,
@@ -106,6 +112,7 @@ pub struct Pomodoro {
 }
 
 impl Pomodoro {
+    /// An idle timer.
     pub fn new(config: PomodoroConfig) -> Self {
         Self {
             config,
@@ -146,6 +153,7 @@ impl Pomodoro {
         }
     }
 
+    /// The durations in use.
     pub fn config(&self) -> &PomodoroConfig {
         &self.config
     }
@@ -156,10 +164,12 @@ impl Pomodoro {
         self.config = config;
     }
 
+    /// The current phase; `Idle` before the first start.
     pub fn phase(&self) -> Phase {
         self.phase
     }
 
+    /// A snapshot for the UI; idle shows a full focus session.
     pub fn view(&self, now: i64) -> PomodoroView {
         PomodoroView {
             phase: self.phase,
@@ -176,6 +186,7 @@ impl Pomodoro {
         }
     }
 
+    /// Time left at `now`; idle counts a whole focus session.
     pub fn remaining(&self, now: i64) -> i64 {
         match self.ends_at {
             Some(ends_at) => (ends_at - now).max(0),
@@ -211,6 +222,7 @@ impl Pomodoro {
         }
     }
 
+    /// Freezes the time left; a no-op if already paused.
     pub fn pause(&mut self, now: i64) {
         if let Some(ends_at) = self.ends_at.take() {
             self.remaining_ms = (ends_at - now).max(0);
@@ -235,6 +247,7 @@ impl Pomodoro {
         }
     }
 
+    /// Moves to the next phase: a long break every few completed sessions, else a short one.
     fn advance(&mut self, now: i64, completed: bool) -> Transition {
         let finished = self.phase;
         let (next, autostart) = match finished {
@@ -261,6 +274,7 @@ impl Pomodoro {
         Transition { finished, next }
     }
 
+    /// Begins `phase` at its full length, running or paused.
     fn enter(&mut self, phase: Phase, now: i64, running: bool) {
         let duration = self.config.duration_ms(phase);
         self.phase = phase;

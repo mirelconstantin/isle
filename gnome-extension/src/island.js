@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 // The island itself: a black shape hanging from the top bar that springs between sizes and
 // cross-fades views. On a bar that is not black it hangs from the screen's top edge, like a notch.
@@ -43,6 +44,7 @@ const VIEW_SHIFT = 8;
 /** Below this shoulder size (CSS px) the corners may climb into the top bar, so the island rounds smoothly. */
 const SHOULDER_FADE = 4;
 
+/** The shape and its views; springs drive the size, and the views stay still on screen as it moves. */
 export const Island = GObject.registerClass({
     Properties: {
         // How strongly `tint` washes the island, so it can fade in and out.
@@ -53,6 +55,7 @@ export const Island = GObject.registerClass({
     },
     Signals: {'geometry-changed': {}},
 }, class Island extends St.Widget {
+    /** Starts at zero size; the first `morph` gives it a shape. */
     _init() {
         super._init({
             name: 'isleIsland',
@@ -110,10 +113,12 @@ export const Island = GObject.registerClass({
         this.connect('destroy', () => this._onDestroy());
     }
 
+    /** Whether a pointer rests on it. */
     get hovered() {
         return this._hovered;
     }
 
+    /** Notifies `hovered` only on a change. */
     _setHovered(hovered) {
         if (hovered === this._hovered)
             return;
@@ -134,6 +139,7 @@ export const Island = GObject.registerClass({
         return super.vfunc_enter_event(event);
     }
 
+    /** Leaving into one of its own children is no leave. */
     vfunc_leave_event(event) {
         const related = event.get_related();
         if (!event.get_event_sequence() && (!related || !this.contains(related)))
@@ -147,6 +153,7 @@ export const Island = GObject.registerClass({
         this._sync();
     }
 
+    /** The top bar's height, as last set. */
     get topInset() {
         return this._topInset;
     }
@@ -157,10 +164,12 @@ export const Island = GObject.registerClass({
         this._sync();
     }
 
+    /** The `tint-strength` property, eased by `setTint`. */
     get tint_strength() {
         return this._tintStrength;
     }
 
+    /** Redraws the tint on its layer: the glow for 'aura', else the shape. */
     set tint_strength(value) {
         this._tintStrength = value;
         this.notify('tint-strength');
@@ -259,10 +268,8 @@ export const Island = GObject.registerClass({
         this._showView(view, growing);
     }
 
-    /**
-     * Shows `view` out of sight and out of the pointer's reach, or hides it again, while the island rests
-     * closed: its next real showing finds its style and layout ready. Never the view on screen; false then.
-     */
+    /** Shows `view` out of sight and reach (or hides it again) while the island rests closed, so its next
+     * showing finds its style and layout ready. Never the view on screen: false then. */
     warmView(view, shown) {
         if (view === this._view)
             return false;
@@ -341,6 +348,7 @@ export const Island = GObject.registerClass({
         view.set_position(x, 0);
     }
 
+    /** Cross-fades from the shown view to `view`, both sliding the way the shape moves. */
     _showView(view, growing = true) {
         if (view === this._view)
             return;
@@ -379,6 +387,7 @@ export const Island = GObject.registerClass({
         slideBy(view, 'y', from, 0, {delay, duration: FADE_IN + 80});
     }
 
+    /** Sizes and places everything from the springs' current values; runs every animation frame. */
     _sync() {
         const width = Math.max(0, this._width.value);
         const height = Math.max(0, this._height.value);
@@ -388,8 +397,12 @@ export const Island = GObject.registerClass({
 
         this.set_size(Math.ceil(outerWidth), Math.ceil(height));
         // A pixel wider on each side, for the fraction the island is drawn off its whole-pixel place.
+        const shapeWidth = Math.ceil(outerWidth) + 2 * SHAPE_PAD, shapeHeight = Math.ceil(height);
+        // Against the size it was last laid out at: that layout is what draws it again.
+        const laidOut = this._shape.get_allocation_box();
+        const resized = shapeWidth !== Math.round(laidOut.get_width()) || shapeHeight !== Math.round(laidOut.get_height());
         this._shape.set_position(-SHAPE_PAD, 0);
-        this._shape.set_size(Math.ceil(outerWidth) + 2 * SHAPE_PAD, Math.ceil(height));
+        this._shape.set_size(shapeWidth, shapeHeight);
         this._glow.set_size(Math.ceil(outerWidth / GLOW_SCALE), Math.ceil(height / GLOW_SCALE));
         // Whole pixels keep text sharp while the island resizes.
         this._stageX = Math.round(margin);
@@ -405,7 +418,10 @@ export const Island = GObject.registerClass({
         for (const view of this._views)
             this._placeView(view);
         if (this._shapeChanged()) {
-            this._shape.queue_repaint();
+            // A new size draws it again as it is laid out: asking as well would draw it twice a frame. Not while
+            // unmapped, when no layout comes until it shows.
+            if (!resized || !this._shape.mapped)
+                this._shape.queue_repaint();
             this._queueGlow();
         }
         this.emit('geometry-changed');
@@ -428,6 +444,7 @@ export const Island = GObject.registerClass({
         return true;
     }
 
+    /** Draws the black shape, with a 'wash' or 'glow' tint over it. */
     _repaint(area) {
         const cr = area.get_context();
         // At the island's exact place (its actor sits on a whole pixel), so its edges never step back.
@@ -447,9 +464,8 @@ export const Island = GObject.registerClass({
         cr.$dispose();
     }
 
-    // The 'aura' light, inside the shape, on the scaled-down glow layer.
-    // A drawing area draws at once when asked, and the glow is asked by the shape and by its motion in the
-    // same frame: it is drawn once, just before the frame. Soft light a frame behind the shape is not seen.
+    // Redraws the 'aura' once, just before the frame: a drawing area draws at once when asked, and the shape
+    // and the motion both ask in one frame. Soft light a frame behind the shape is not seen.
     _queueGlow() {
         if (!this._glow.visible || this._glowLater)
             return;
@@ -461,6 +477,7 @@ export const Island = GObject.registerClass({
         });
     }
 
+    /** Draws the 'aura' light inside the shape, on the scaled-down glow layer. */
     _repaintGlow(area) {
         const cr = area.get_context();
         const height = Math.max(0, this._height.value);
@@ -528,6 +545,7 @@ export const Island = GObject.registerClass({
         return [wash];
     }
 
+    /** Stops the springs and a pending glow redraw. */
     _onDestroy() {
         this._driver?.destroy();
         this._driver = null;

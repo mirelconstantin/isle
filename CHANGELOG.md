@@ -16,6 +16,71 @@ All notable changes to Isle are listed here. The format follows
 - With the island following the display in use, the closed island is the same size on a display without
   a top bar as on the main one: it no longer shrinks (256×30 against 232×48) when it moves there.
 
+## [1.4.0] - 2026-10-27
+
+### Added
+
+- Updating takes a click: when a new Isle is out, its alert's Update opens Settings → About, where Update
+  downloads it, checks it and installs it (no terminal, no password), then Log Out finishes it. If it
+  can't, it says why and offers the terminal command. It goes on if Settings is closed. A .deb, .rpm or
+  Arch package install says how to update its package.
+- Settings → Island → Pages turns each tab of the open island on or off: Music, Notifications, Focus,
+  Reminders, Shelf, Calendar and AI Usage. A page turned off takes what goes with it: Music its song in the
+  closed island, its bars and the new-song alerts; Notifications the unread dot; Shelf gives Super+V back
+  to GNOME. One page always stays on.
+- The AI assistant can be turned off in the same place (and first thing on Settings → Assistant): the ✦
+  and Super+I go, and Isle never asks an AI.
+- World clocks: the time in other cities, under the day's events on the Calendar page; click them (or the
+  globe) for how far ahead or behind each is, and its day when it isn't yours. It's GNOME's own list, the
+  one in its calendar menu and the Clocks app; add and remove cities in Settings → Island → World Clocks.
+- The top bar beside the island goes from glass to black on a slider, rather than a choice of the two;
+  the island itself stays black. Your choice carries over.
+- The assistant offers only the models your plan includes, by their full names (Opus 5.5, GPT-6.1-Sol,
+  Gemini 3.8 Flash), read from your own account, with your plan's name in Settings. When a plan no
+  longer includes the model you picked (a subscription that lapsed), the assistant uses your plan's
+  default and says so once; your pick comes back by itself when the plan allows it again. A request
+  refused for its model is answered with the default rather than failing.
+- Grok (xAI's `grok`) as a fourth AI for the assistant, found by itself once installed and signed in,
+  with your plan's models, and its plan on the Usage page (a Free plan's week, though Grok doesn't say
+  how much of it is used). It runs in Isle's own folder, kept to answering: no commands or files of its
+  own, and none of your Claude Code setup. Thanks to @caffeinepx.
+- A notification's alert shows all of its buttons, as GNOME's banner does ("Decline" and "Accept", not
+  just the first), and a click does what GNOME's would: the app is told, and the notification goes,
+  unless it is one that updates itself.
+
+### Changed
+
+- Codex is listed as "Codex (ChatGPT)": it is how Isle uses ChatGPT, with your ChatGPT plan.
+- Plans are named as the apps name them: ChatGPT "Pro" (was "Pro Lite"), as Codex does.
+- Claude's Fable models are not offered: in the assistant they would use your usage credits without asking.
+- The open island's tabs and its pages line up: the open tab's pill, each page's first and last items
+  and the settings icon sit on the same left and right edges.
+- Settings → Island → Alerts starts with a Notifications switch, on: apps' notifications in the island.
+  Turned off, GNOME shows its own banners (it was "GNOME's notification banners", off).
+- Opening, closing and switching tabs do less work: the island's shape is drawn once a frame instead of
+  twice, and a tab's name is measured once, so the motion stutters less, most of all on fast displays.
+
+### Fixed
+
+- In GNOME's light style the top bar's icons and text turned dark on Isle's black or glass bar; they stay
+  white.
+- With the top bar hidden by another extension (Hide Top Bar, Just Perfection), or on a display without
+  one, a maximized window such as Firefox covered the whole screen and GNOME stopped drawing the island
+  over it: it vanished while still taking the pointer, came back with a website's menu or tooltip, and
+  flickered. It is drawn now, as GNOME's own menus and notifications are, while such a window is there.
+- Hide Top Bar turned on (or updated) while Isle ran put the bar over the island, so hovering it didn't
+  open it while the bar showed. The bar goes back below the island.
+- An update that fails part way (a full disk) leaves the installed programs and extension whole, and two
+  installs at once (Settings and a terminal) can't mix: the second says so and stops.
+- Hovering or clicking a notification alert opens the Notifications page; with that page turned off, it
+  opened another one.
+- A call's preview showed another window of the browser when the call's tab was in, or moved to, a window
+  of its own: it follows the window that shows the call.
+- The first Codex request of a day could fail: the daily clean-up could delete Codex's databases while
+  Codex was starting.
+- Settings listed Codex's models as saved under an earlier plan, offering models the plan no longer (or
+  not yet) included; picking one made every request fail.
+
 ## [1.3.1] - 2026-10-26
 
 ### Fixed
@@ -1182,7 +1247,10 @@ The first release.
   dark, vivid ones bright.
 - Text is at least 12 px throughout.
 
-[Unreleased]: https://github.com/zickrian/isle/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/zickrian/isle/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/zickrian/isle/compare/v1.3.1...v1.4.0
+[1.3.1]: https://github.com/zickrian/isle/compare/v1.3.0...v1.3.1
+[1.3.0]: https://github.com/zickrian/isle/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/zickrian/isle/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/zickrian/isle/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/zickrian/isle/compare/v1.0.6...v1.1.0

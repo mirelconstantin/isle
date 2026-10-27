@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 // The assistant's rules that need no GNOME: `node --experimental-default-type=module --test tests/extension/*.test.js`.
 
@@ -45,6 +46,7 @@ const HOME = '/home/ana';
 const USER = {home: HOME, cache: `${HOME}/.cache`, uid: '1000', gid: '1000'};
 const SYSTEM_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin';
 const LOG = `${HOME}/.cache/isle/runs/run-1-0.log`;
+// The systemd-run argv isled sends to run `command`, as the user or as root.
 function spawn(command, {user = false, path = null, who = ['1000', '1000', LOG]} = {}) {
     return [
         'systemd-run', ...user ? ['--user'] : [], '--unit=isle-run-1-0', '--collect', '--quiet',

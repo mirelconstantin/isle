@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -24,6 +25,7 @@ const BATTERY_GRACE: Duration = Duration::from_millis(2500);
 /// only if nothing changed during [`BATTERY_GRACE`], so a bounced device is not listed.
 type Generations = Arc<Mutex<HashMap<String, u64>>>;
 
+/// Follows BlueZ: connected devices and their batteries, with an alert as one connects or goes.
 pub async fn watch(system: Connection, iface: InterfaceRef<SystemService>) -> anyhow::Result<()> {
     let manager = ObjectManagerProxy::builder(&system)
         .destination(BLUEZ)?
@@ -104,6 +106,7 @@ async fn properties_changed(system: &Connection, interface: &str) -> zbus::Resul
     MessageStream::for_match_rule(rule, system, None).await
 }
 
+/// A device connected or went; a connection is announced once it has held for `BATTERY_GRACE`.
 async fn connection_changed(
     system: &Connection,
     iface: &InterfaceRef<SystemService>,
@@ -177,6 +180,7 @@ async fn connection_changed(
     }
 }
 
+/// A connected device's battery, as BlueZ reports it.
 async fn set_battery(iface: &InterfaceRef<SystemService>, path: &str, percent: u8) {
     publish(
         iface,
@@ -190,6 +194,7 @@ async fn set_battery(iface: &InterfaceRef<SystemService>, path: &str, percent: u
     .await;
 }
 
+/// A device's name and icon, and its battery if it reports one.
 async fn read_device(system: &Connection, path: &ObjectPath<'_>) -> zbus::Result<BluetoothDevice> {
     let properties = PropertiesProxy::builder(system)
         .destination(BLUEZ)?

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 // Small building blocks shared by the island's views.
 
@@ -92,6 +93,7 @@ export function icon(name) {
     return icons.get(name);
 }
 
+/** A label centred vertically in its row. */
 export function label(text, styleClass, props = {}) {
     return new St.Label({text, style_class: styleClass, y_align: Clutter.ActorAlign.CENTER, ...props});
 }
@@ -119,6 +121,7 @@ export function wrapFixedLines(label, ellipsize = Pango.EllipsizeMode.NONE) {
     wrapText(label, ellipsize).set_markup(`<span insert_hyphens="false">${GLib.markup_escape_text(label.text, -1)}</span>`);
 }
 
+/** Wraps by word, breaking inside one too long for a line; returns the label's ClutterText. */
 function wrapText(label, ellipsize) {
     const text = label.clutter_text;
     text.line_wrap = true;
@@ -127,10 +130,8 @@ function wrapText(label, ellipsize) {
     return text;
 }
 
-/**
- * Fences in a bin's or fixed layout's children with two empty ends, so St never restyles a child's whole subtree
- * as it becomes or stops being the first or last one shown. Returns the end to add further children before.
- */
+/** Fences a bin's or fixed layout's children with two empty ends, so St never restyles a child's subtree as it
+ * becomes or stops being the first or last shown. Returns the end to add further children before. */
 export function fence(box) {
     box.insert_child_at_index(new Clutter.Actor(), 0);
     const end = new Clutter.Actor();
@@ -151,9 +152,8 @@ export function iconButton(iconName, styleClass, onClick, {size = 16, accessible
     return button;
 }
 
-/** A small × on the top-left corner of an alert's icon, shown under the pointer (see `revealClose`), as on
- * macOS's notifications: put over the icon, it takes no room, so nothing moves as it shows. `out` (CSS px) is
- * how far it sits out from the corner: further for a round icon, whose corner is empty. */
+/** A small × over the top-left corner of an alert's icon, shown under the pointer (see `revealClose`), taking
+ * no room. `out` (CSS px) sets it further out from the corner, for a round icon whose corner is empty. */
 export function cornerClose(onClick, {out = 8} = {}) {
     const button = iconButton('isle-close-symbolic', 'isle-corner-close', onClick, {size: 8, accessibleName: 'Close'});
     // Always there, only faded out and untouchable: showing and hiding it would restyle the icon beside it.
@@ -219,6 +219,7 @@ export const Ring = GObject.registerClass({
             GObject.ParamFlags.READWRITE, 0, 1, 0),
     },
 }, class Ring extends St.Widget {
+    /** `size` in CSS pixels; `child` (a badge) sits in the middle and pops in with a sweep. */
     _init({size, lineWidth = 2.5, color = [1, 1, 1], trackOpacity = 0.18, child = null}) {
         super._init({
             layout_manager: new Clutter.BinLayout(),
@@ -253,10 +254,12 @@ export const Ring = GObject.registerClass({
         this.set_size(px(size), px(size));
     }
 
+    /** How much of the ring is drawn, 0..1. */
     get progress() {
         return this._progress;
     }
 
+    /** Clamped; repaints only for a change that shows. */
     set progress(value) {
         const clamped = Math.min(1, Math.max(0, value));
         if (Math.abs(clamped - this._progress) < 0.001)
@@ -300,6 +303,7 @@ export const Ring = GObject.registerClass({
         }
     }
 
+    /** Drops the sweep under way and starts again from `from`, the badge shrunk when starting empty. */
     _restart(from = 0) {
         this.remove_transition('progress');
         this._sweeping = null;
@@ -312,6 +316,7 @@ export const Ring = GObject.registerClass({
             this._sweep();
     }
 
+    /** Runs the waiting sweep, and pops the badge in if it is still small. */
     _sweep() {
         const fill = this._pendingFill ?? this._sweeping;
         if (!fill)
@@ -338,6 +343,7 @@ export const Ring = GObject.registerClass({
         }
     }
 
+    /** [r, g, b], each 0..1. */
     set color(rgb) {
         const color = this._color;
         if (rgb[0] === color[0] && rgb[1] === color[1] && rgb[2] === color[2])
@@ -346,6 +352,7 @@ export const Ring = GObject.registerClass({
         this._area.queue_repaint();
     }
 
+    /** The faint track, then the arc of progress from 12 o'clock. */
     _repaint(area) {
         const cr = area.get_context();
         const [width, height] = area.get_surface_size();
@@ -372,6 +379,7 @@ export const Ring = GObject.registerClass({
 /** Equaliser bars that dance while music plays. */
 export const Bars = GObject.registerClass(
 class Bars extends St.BoxLayout {
+    /** `height` is the tallest bar, in CSS pixels. */
     _init({height = 14, count = 4} = {}) {
         super._init({style_class: 'isle-bars', y_align: Clutter.ActorAlign.CENTER});
         this._maxHeight = height;
@@ -407,6 +415,7 @@ class Bars extends St.BoxLayout {
         this._bars.forEach(bar => (bar.height = stageHeight));
     }
 
+    /** Bar `index`'s height at rest, as a share of the tallest. */
     _rest(index) {
         // A fixed "|ılı" silhouette when not animating.
         return [0.45, 1, 0.7, 0.35, 0.8][index % 5];
@@ -453,6 +462,7 @@ class Bars extends St.BoxLayout {
         }
     }
 
+    /** One tick of the shared clock: each bouncing bar moves along its curve. */
     _step() {
         this._now += this._clock.get_delta();
         // Frames in between change nothing, so the shell draws nothing new for them (see BARS_STEP_MS).
@@ -477,12 +487,14 @@ class Bars extends St.BoxLayout {
         }
     }
 
+    /** Stops every bounce and the clock. */
     _stop() {
         for (const bounce of this._bounces)
             bounce.on = false;
         this._clock.stop();
     }
 
+    /** Leaves no clock running. */
     _onDestroy() {
         this._playing = false;
         this._stop();
@@ -591,10 +603,8 @@ export function forEachChild(path, callback, cancellable = null) {
         });
 }
 
-/**
- * A small copy of the cover at `path`, decoded and saved off the main thread, or null: St decodes a background
- * image whole in the frame that first paints it, tens of milliseconds for a big cover.
- */
+/** A small copy of the cover at `path`, decoded and saved off the main thread, or null: St decodes a background
+ * image whole in the frame that first paints it, tens of milliseconds for a big cover. */
 export const smallCover = memoByFile(async path => {
     if (!path)
         return null;
@@ -664,6 +674,7 @@ export const Art = GObject.registerClass({
     // The image changed; `showsIcon` may have too.
     Signals: {'shown': {}},
 }, class Art extends St.Bin {
+    /** `size` and `radius` in CSS pixels. */
     _init({size, radius}) {
         super._init({
             style_class: 'isle-art',
@@ -717,6 +728,7 @@ export const Art = GObject.registerClass({
         });
     }
 
+    /** The image at `path` as the background, or the placeholder for none; then emits `shown`. */
     _show(path) {
         const base = `border-radius: ${this._radius}px;`;
         if (path) {
@@ -749,10 +761,8 @@ function allocateAt(actor, x, y, width, height) {
     actor.allocate(Clutter.ActorBox.new(x, y, x + width, y + height));
 }
 
-/**
- * Motions an alert's icon makes once as it appears, as SF Symbols' effects: each a list of steps,
- * [property values, ms, easing]. Transforms only, so nothing is laid out or restyled again.
- */
+/** Motions an alert's icon makes once as it appears, as SF Symbols' effects: steps of [values, ms, easing].
+ * Transforms only, so nothing is laid out or restyled again. */
 const MOTIONS = {
     // A small hop: notifications, an answer, a new version.
     bounce: [[{scale_x: 1.18, scale_y: 1.18}, 140, 'EASE_OUT_QUAD'], [{scale_x: 1, scale_y: 1}, 260, 'EASE_OUT_BACK']],
@@ -775,11 +785,8 @@ const RISE_DELAY = 120;
 /** Motions waiting for their actor to be on screen (GNOME skips eases on actors that are not). */
 const pendingMotions = new WeakMap();
 
-/**
- * Slides `actor` along `axis` ('x' or 'y') from `from` to `to` px over `duration` ms (after `delay`), easing
- * out, in whole pixels: a picture or text between two pixels is resampled and seems to shiver as it moves.
- * `onDone` runs once it gets there; a later slide on the same axis takes over.
- */
+/** Slides `actor` along `axis` ('x' or 'y') from `from` to `to` px, in whole pixels: between two pixels a picture
+ * or text is resampled and shivers. `onDone` runs on arrival; a later slide on the same axis takes over. */
 export function slideBy(actor, axis, from, to, {delay = 0, duration = 0, onDone = null} = {}) {
     const key = `_isleSlide${axis}`;
     const property = `translation_${axis}`;
@@ -865,6 +872,7 @@ const WAVE_STAGGER_MS = 70;
 /** A speaker whose waves come one by one as the volume rises and go as it falls. */
 export const VolumeGlyph = GObject.registerClass(
 class VolumeGlyph extends St.Widget {
+    /** The speaker, its slashed form and three waves, stacked; `size` in CSS pixels. */
     _init({size = 16} = {}) {
         super._init({layout_manager: new Clutter.BinLayout(), x_align: Clutter.ActorAlign.CENTER, y_align: Clutter.ActorAlign.CENTER});
         const part = name => new St.Icon({gicon: icon(name), icon_size: size});
@@ -916,6 +924,7 @@ class VolumeGlyph extends St.Widget {
             this._sync(fresh);
     }
 
+    /** Eases the waves and speaker to the level and mute state; `stagger` brings waves in one by one. */
     _sync(stagger) {
         const shown = this._muted ? 0 : this._count;
         this._waves.forEach((wave, index) => {
@@ -943,6 +952,7 @@ class VolumeGlyph extends St.Widget {
 /** A thin horizontal level meter. */
 export const LevelBar = GObject.registerClass(
 class LevelBar extends St.Widget {
+    /** As wide as `width` CSS pixels at any scale. */
     _init({width, styleClass = ''}) {
         super._init({
             style_class: `isle-level ${styleClass}`,
@@ -990,6 +1000,7 @@ class LevelBar extends St.Widget {
             this._fill.width = fill;
     }
 
+    /** 0..1. */
     get level() {
         return this._level;
     }
@@ -1004,6 +1015,7 @@ class LevelBar extends St.Widget {
             this._grow();
     }
 
+    /** Eases the fill out from empty after the waiting delay. */
     _grow() {
         const delay = this._pendingGrow;
         this._pendingGrow = null;
@@ -1020,6 +1032,7 @@ class LevelBar extends St.Widget {
         this._fill.style = `background-color: ${color};`;
     }
 
+    /** The fill from the left edge, at its current width. */
     vfunc_allocate(box) {
         this.set_allocation(box);
         // The fill's width is the (possibly easing) value set in `level`.
@@ -1034,6 +1047,7 @@ export const Slider = GObject.registerClass({
         'released': {param_types: [GObject.TYPE_DOUBLE]},
     },
 }, class Slider extends St.Widget {
+    /** `scrollStep` is how far one scroll moves it; 0 leaves scrolling to the parent. */
     _init({scrollStep = 0} = {}) {
         super._init({
             style_class: 'isle-slider',
@@ -1062,6 +1076,7 @@ export const Slider = GObject.registerClass({
         });
     }
 
+    /** Where it is, 0..1. */
     get value() {
         return this._value;
     }
@@ -1081,10 +1096,12 @@ export const Slider = GObject.registerClass({
             this.queue_relayout();
     }
 
+    /** The knob shows while hovered or dragged. */
     _syncKnob() {
         this._knob.ease({opacity: this.hover || this._grab ? 255 : 0, duration: 120});
     }
 
+    /** Track, fill and knob laid out by hand, the knob centred on the value. */
     vfunc_allocate(box) {
         this.set_allocation(box);
         const [width, height] = [box.get_width(), box.get_height()];
@@ -1098,6 +1115,7 @@ export const Slider = GObject.registerClass({
         allocateAt(this._knob, Math.round(width * this._value - knob / 2), Math.round((height - knob) / 2), knob, knob);
     }
 
+    /** Sets the value under the pointer and emits `value-changed`. */
     _moveTo(event) {
         const [x] = event.get_coords();
         const [ok, localX] = this.transform_stage_point(x, 0);
@@ -1107,6 +1125,7 @@ export const Slider = GObject.registerClass({
         this.emit('value-changed', this._value);
     }
 
+    /** Grabs the pointer, so a drag carries on outside the slider. */
     vfunc_button_press_event(event) {
         // A second button pressed mid-drag keeps the one grab.
         this._grab ??= global.stage.grab(this);
@@ -1114,6 +1133,7 @@ export const Slider = GObject.registerClass({
         return Clutter.EVENT_STOP;
     }
 
+    /** Follows the pointer while dragging. */
     vfunc_motion_event(event) {
         if (!this._grab)
             return Clutter.EVENT_PROPAGATE;
@@ -1121,6 +1141,7 @@ export const Slider = GObject.registerClass({
         return Clutter.EVENT_STOP;
     }
 
+    /** Lets go and emits `released` with the final value. */
     vfunc_button_release_event(event) {
         if (!this._grab)
             return Clutter.EVENT_PROPAGATE;
@@ -1132,6 +1153,7 @@ export const Slider = GObject.registerClass({
         return Clutter.EVENT_STOP;
     }
 
+    /** Moves by `scrollStep` and emits both signals, as a scroll has no release. */
     vfunc_scroll_event(event) {
         if (!this._scrollStep)
             return Clutter.EVENT_PROPAGATE;
@@ -1156,6 +1178,7 @@ export const Slider = GObject.registerClass({
 /** Coloured dots for what is in use: green camera, orange microphone, blue screen sharing. */
 export const PrivacyDots = GObject.registerClass(
 class PrivacyDots extends St.BoxLayout {
+    /** A hidden dot per kind, always in the same order. */
     _init() {
         super._init({style_class: 'isle-privacy-dots', y_align: Clutter.ActorAlign.CENTER, visible: false});
         this._dots = {};
@@ -1189,11 +1212,13 @@ class PrivacyDots extends St.BoxLayout {
 /** A red dot that breathes slowly while a screen recording runs. */
 export const RecordingDot = GObject.registerClass(
 class RecordingDot extends St.Widget {
+    /** Breathes again each time it is shown. */
     _init() {
         super._init({style_class: 'isle-recording-dot', y_align: Clutter.ActorAlign.CENTER});
         this.connect('notify::mapped', () => this._breathe());
     }
 
+    /** Starts the slow fade in and out; off screen it rests fully lit. */
     _breathe() {
         this.remove_transition('opacity');
         this.opacity = 255;

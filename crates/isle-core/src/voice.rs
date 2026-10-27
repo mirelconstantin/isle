@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 //! Decides when a spoken request ends: speech starts above the room's noise,
 //! and a pause after it (or a long silence before it) ends the recording.
@@ -26,6 +27,7 @@ const NO_SPEECH_MS: u32 = 7000;
 /// The longest request kept.
 const MAX_MS: u32 = 30_000;
 
+/// What `push` says after each chunk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verdict {
     /// Keep recording.
@@ -48,6 +50,7 @@ pub struct Endpointer {
 }
 
 impl Endpointer {
+    /// A fresh recording, nothing heard yet.
     pub fn new() -> Self {
         Self::default()
     }

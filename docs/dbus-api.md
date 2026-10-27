@@ -173,6 +173,9 @@ starts it; isled follows the log to the end (its last line is
 | `ClearChat()` | | Deletes the conversation now, with the AI's copy. Any caller (Settings asks it). |
 | `State` | `s` | `{phase, heard, reply, actions, error, hint, sign_in, provider, set_up, model, listen, heard_nothing, activity, turn, step}`. With `sign_in`, signing in to `provider` fixes the error; with `set_up`, running `isle-setup-voice model` does. `phase` is `idle`, `listening`, `transcribing`, `thinking`, `acting`, `reply` or `error`. In `acting`, `actions` are to run now, once per `step`, and reported with `Results`; in `reply`, they are what the answer asks, run once per `turn`. `activity` says what the AI is doing while it thinks ("Searching ~/Downloads for “ttd”…"); `draft`, its answer so far as it writes it. `card` is the command it asked to run, or null: `{id, command, why, detail, risks, status, output, seconds, exit, stop}`, `risks` some of `root`, `internet`, `removes`, `status` `waiting`, `running`, `done`, `failed`, `denied` or `stopped`, `output` its last lines (secrets blanked), and `stop` the argv that stops it. |
 | `History` | `s` | The conversation: `[{role, text, spoken, command, status, at}]`, `role` `user`, `assistant` or `command` (with `command` and its `status`), the newest 50. |
+| `Models` | `s` | Each AI installed and signed in, its plan and the models the plan allows: `{claude, codex, grok, agy}`, each `{plan, default, default_name, models: [{id, name}], checked_ms}`. `plan` is as the account has it (`Team`, `Pro`, `Free`; empty for agy, whose plan cannot be read); `default` is what an empty model in the context answers with (empty: the CLI's own choice). Claude's models are its aliases (`opus`, `sonnet`, `haiku`, never Fable), named as the model each means now, from Claude Code's own cached catalog; Codex's from its app server's `model/list`; Grok's from `grok models`; agy's from `agy models`. Kept in `models.json`. Any caller (Settings reads it). |
+| `RefreshModels()` | | Looks at `Models` again in the background and returns at once; Codex and agy at most once a minute. Also looked at: Codex's and Claude's when the usage shows another plan, agy's every 6 hours as the assistant opens, and an AI's after it refused a model. Any caller. |
+| `ModelSwitched` (signal) | `ssss` | `(provider, plan, picked, used)`, by names: the AI answers with `used` because its plan lacks `picked` (or it refused it, and the request was asked again with `used`). Once per pick; the pick is kept and used again once the plan allows it. |
 | `Notice` (signal) | `sb` | `(text, ok)`: a command ended while no request watched it (isled had restarted). |
 | `Level` (signal) | `d` | The microphone's level (0..1) while listening, 20 times a second. |
 
@@ -188,7 +191,7 @@ nothing runs.
 
 | Member | Signature | |
 |---|---|---|
-| `SetConfig(s config)` | | `{enabled, claude, codex, warn, critical}`, from Settings; off until set. |
+| `SetConfig(s config)` | | `{enabled, claude, codex, grok, assistant, warn, critical}`, from Settings; off until set. `assistant` false: a plan seen here starts no AI to list its models. |
 | `Refresh()` | | Reads again now (Claude at most every two minutes). |
 | `Usage` | `s` | `{providers: [{id, name, plan, windows: [{label, percent, resets_at_ms}], updated_ms, note}]}`; a provider not signed in is left out. |
 | `Alert` (signal) | `ssdx` | `(provider, window, percent, resets_at_ms)`: a limit passed the warning or the critical share, once per window. |

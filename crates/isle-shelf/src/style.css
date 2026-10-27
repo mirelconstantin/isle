@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
+/* Copyright (C) 2026 zickrian */
 
 /* Mirrors the island's Files tab (stylesheet.css), which this window replaces. */
 
@@ -11,9 +12,8 @@ window.isle-shelf {
   font-feature-settings: "tnum";
 }
 
-/* The whole window takes drops. A grey dashed outline marks it as one rounded area on an empty
- * shelf and while a file is on its way; brighter with the pointer over it; red if full. Its fill
- * and light, in the files' colours, are the island's beneath (files.js, dropLight.js). */
+/* The whole window takes drops. Dashed outline: grey when empty or mid-drop, brighter under the
+ * pointer, red if full. Fill and light are the island's beneath (files.js, dropLight.js). */
 .drop-area {
   border-radius: 16px;
   border: 1px dashed transparent;

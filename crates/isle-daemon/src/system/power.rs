@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -35,6 +36,7 @@ const STATE_CHARGING: u32 = 1;
 const STATE_FULLY_CHARGED: u32 = 4;
 const STATE_PENDING_CHARGE: u32 = 5;
 
+/// Follows UPower's battery for the state and the plugged, full and low alerts, until the bus closes.
 pub async fn watch(system: Connection, iface: InterfaceRef<SystemService>) -> anyhow::Result<()> {
     let properties = PropertiesProxy::builder(&system)
         .destination(DESTINATION)?

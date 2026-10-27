@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 // Decides what the island shows and when (compact, peek or expanded); see docs/product-spec.md.
 // Alerts show one at a time; "instant" ones (volume, brightness, critical...) replace what is showing.
@@ -18,7 +19,7 @@ import * as Alerts from './alerts.js';
 import {paletteFor} from './bot.js';
 import {ClipboardHistory} from './clipboard.js';
 import {CompactView} from './compact.js';
-import {grabsKeyboard, onUiScale, px, uiScale} from './compat.js';
+import {grabsKeyboard, inhibitScanout, onUiScale, px, uiScale} from './compat.js';
 import {Daemon} from './daemon.js';
 import {BOTTOM_PADDING, ExpandedView, PAGE_HEIGHT} from './expanded.js';
 import {Island} from './island.js';
@@ -50,9 +51,8 @@ const REST_DISTANCE_PX = 10;
 /** The views and pages are laid out ahead this long after starting, a step at a time (see `_warmUp`). */
 const WARM_START_MS = 3000;
 const WARM_STEP_MS = 60;
-/** What the alert views are laid out with ahead (see `_warmUp`): the parts most alerts have. */
-// A ring alert's parts, laid out out of sight (see `_warmUp`). Its words are blank, figure spaces as wide as
-// real ones, so nothing readable could ever show even if a frame caught it.
+// A ring alert's parts, the alert views' warm-up (see `_warmUp`). Its words are blank, figure spaces as wide
+// as real ones, so nothing readable could ever show even if a frame caught it.
 const WARM_ALERT = {key: 'warm', title: '\u2007'.repeat(8), subtitle: '\u2007'.repeat(4), icon: 'isle-bolt', ring: 0,
     value: '\u2007'.repeat(3), tone: 'neutral'};
 /** And again this long after the island closes, or a page changes out of sight, while it stays closed... */
@@ -78,12 +78,12 @@ const SWIPE_GAP_MS = 180;
 const PAGE_MEMORY_MS = 5 * 60 * 1000;
 /** An alert's width is checked again this soon after it shows. */
 const ALERT_FIT_DELAY_MS = 60;
-/** Where updating is explained. */
-const UPDATE_HELP = 'https://github.com/zickrian/isle/blob/main/docs/install.md#updating';
 /** Which switch in Settings each kind of system event answers to. */
 const SYSTEM_ALERTS = {power: 'power', battery_low: 'power', battery_full: 'power', network: 'network', bluetooth: 'bluetooth'};
 /** The open island's header on a display without the top bar. */
 const HEADER_WITHOUT_BAR = 32;
+/** A window's animation (minimizing, say) is over by then, so whether it covers the display is checked again. */
+const SCANOUT_SETTLE_MS = 400;
 /** isled may be away this long (restarting after an update) before the island does anything about it. */
 const SERVICE_GRACE_MS = 5000;
 /** Opened from the keyboard without getting it, the island closes this soon unless the pointer is on it. */
@@ -125,7 +125,6 @@ const VOICE_LEAVE_MS = 1200;
 const MIC_WAIT_MS = 400;
 /** Closed while listening, a request isled starts on within this long (ms) was the last words' own. */
 const CLOSED_LISTENING_MS = 3000;
-/** isled's phases while it works on a request: with the island closed, it carries on in the background. */
 /** Where in its flow, and how bright, the still glow of an alert that asks is drawn. */
 const ALERT_GLOW_TIME = 2.2;
 const ALERT_GLOW_LEVEL = 0.3;
@@ -133,6 +132,7 @@ const ALERT_GLOW_LEVEL = 0.3;
 const APPROVAL_MS = 10 * 60 * 1000;
 /** In the conversation, the field comes back this soon (ms) after an answer. */
 const CHAT_TYPE_AGAIN_MS = 250;
+/** isled's phases while it works on a request: with the island closed, it carries on in the background. */
 const VOICE_WORKING = ['transcribing', 'thinking', 'acting'];
 
 // Pages that open by default when they have something to show, best first, unless one was picked
@@ -141,7 +141,9 @@ const DEFAULT_PAGE_ORDER = ['call', 'notifications', 'music', 'focus'];
 /** The AI agents Isle can hear from (see `Agents1` in the daemon). */
 const AGENT_PROVIDERS = ['claude', 'codex'];
 
+/** Builds the island a part at a time, then decides what it shows until `destroy`. */
 export class Controller {
+    /** Starts building on idle; nothing shows until `_buildIsland`. */
     constructor(extension) {
         this._extension = extension;
         this._settings = extension.getSettings();
@@ -225,6 +227,7 @@ export class Controller {
         });
     }
 
+    /** What the views watch: notifications, privacy, calls, audio, focus mode and the clipboard. */
     _buildServices() {
         // One "system alerts" switch before 0.7: an "off" there carries over to each of its parts.
         if (!this._settings.get_boolean('system-alerts')) {
@@ -241,6 +244,7 @@ export class Controller {
         this._writer = new TextWriter(this._clipboard);
     }
 
+    /** The island and its closed, alert and voice views; the pages follow a step at a time. */
     _buildViews() {
         this._island = new Island();
         this._compact = new CompactView(this._daemon, this._settings, this._privacy, this._call);
@@ -264,6 +268,7 @@ export class Controller {
         this._render();
     }
 
+    /** The last step: hooks the island to GNOME and isled, then lets isled's held changes through. */
     _connectAll() {
         this._primaryChanged = global.display.get_selection().connect('owner-changed', (_selection, type) => {
             if (type === Meta.SelectionType.SELECTION_PRIMARY)
@@ -279,6 +284,7 @@ export class Controller {
         });
         // Hidden by a fullscreen window meanwhile: what waited shows now.
         this._island.connect('notify::visible', () => {
+            this._syncScanout();
             if (!this._island.visible) {
                 this._onHidden();
                 return;
@@ -288,6 +294,26 @@ export class Controller {
             if (!this._alert)
                 this._nextAlert();
         });
+        // A window that may now cover the island's display, or no longer: see `_syncScanout`. Again once its
+        // animation (minimizing, say) is over, as some signals come as it starts.
+        const sync = () => {
+            this._syncScanout();
+            this._later('scanout', SCANOUT_SETTLE_MS, () => this._syncScanout());
+        };
+        this._scanoutWatches = [
+            [global.display, ['restacked', 'workareas-changed', 'in-fullscreen-changed', 'window-entered-monitor',
+                'window-left-monitor']],
+            [global.window_manager, ['size-changed', 'minimize', 'unminimize', 'map', 'destroy']],
+            [global.workspace_manager, ['active-workspace-changed']],
+            [Main.layoutManager.panelBox, ['notify::mapped', 'notify::y', 'notify::translation-y']],
+        ].flatMap(([source, signals]) => signals.map(signal => [source, source.connect(signal, sync)]));
+        this._syncScanout();
+        this._panelAdded = Main.layoutManager.uiGroup.connect('child-added', (_group, actor) => {
+            // Once GNOME has placed it, which it does right after this.
+            if (actor === Main.layoutManager.panelBox)
+                this._later('panel', 0, () => this._keepAbovePanel());
+        });
+        this._keepAbovePanel();
         this._connectSignals();
         this._keyboard = new KeyboardWatcher();
         this._keyboard.connect('caps-lock', (_watcher, on) => this._postSystemAlert(Alerts.capsLock(on), 'caps-lock'));
@@ -303,6 +329,7 @@ export class Controller {
         this._syncVoiceEnabled();
         this._syncUsage();
         this._syncEventAlerts();
+        this._syncPages();
         // The pointer met while it was still being built (after unlocking, at rest on it) is told now.
         if (this._island.hovered)
             this._onHoverChanged();
@@ -327,6 +354,7 @@ export class Controller {
         ];
     }
 
+    /** The open island over `pages`, its signals wired to the keyboard, closing, warm-ups and tints. */
     _buildExpanded(pages) {
         for (const page of pages) {
             page.connect('request-keyboard', (_page, wanted) => this._setKeyboard(wanted));
@@ -365,6 +393,7 @@ export class Controller {
         return expanded;
     }
 
+    /** Everything else it reacts to: pointer, keys, the shelf helper, Settings, isled and notifications. */
     _connectSignals() {
         const island = this._island;
         island.connect('notify::hovered', () => this._onHoverChanged());
@@ -379,6 +408,9 @@ export class Controller {
 
         // A file dragged towards the island opens the shelf to drop it on.
         this._shelfHelper.connect('drag-near', () => {
+            // Left out in Settings: no shelf to drop on.
+            if (this._shelf.hidden)
+                return;
             this._shelf.showTab('files');
             this._shelf.dropping = true;
             this.expand('shelf');
@@ -412,14 +444,19 @@ export class Controller {
         this._settingsChanged.push(this._settings.connect('changed::island-monitor', () => this._updateGeometry()));
         // On the display in use, it follows the window in front, once closed.
         this._focusMonitorChanged = global.display.connect('window-entered-monitor', () => this._syncMonitor());
-        this._settingsChanged.push(this._settings.connect('changed::voice-assistant', () => this._syncVoiceEnabled()));
+        this._settingsChanged.push(this._settings.connect('changed::voice-assistant', () => {
+            this._syncVoiceEnabled();
+            this._syncUsage();
+        }));
         this._settingsChanged.push(this._settings.connect('changed::voice-shortcut', () => (this._voice.shortcut = this._voiceShortcut)));
         for (const key of ['bot-shape', 'bot-color', 'bot-glow'])
             this._settingsChanged.push(this._settings.connect(`changed::${key}`, () => this._syncBotLook()));
-        for (const key of ['usage-enabled', 'usage-claude', 'usage-codex', 'usage-warn', 'usage-critical'])
+        for (const key of ['usage-enabled', 'usage-claude', 'usage-codex', 'usage-grok', 'usage-warn', 'usage-critical'])
             this._settingsChanged.push(this._settings.connect(`changed::${key}`, () => this._syncUsage()));
         for (const key of ['event-alerts', 'event-alert-minutes'])
             this._settingsChanged.push(this._settings.connect(`changed::${key}`, () => this._syncEventAlerts()));
+        for (const key of ['hidden-pages', 'world-clocks'])
+            this._settingsChanged.push(this._settings.connect(`changed::${key}`, () => this._syncPages()));
         for (const provider of AGENT_PROVIDERS) {
             this._settingsChanged.push(this._settings.connect(`changed::agent-alerts-${provider}`, () =>
                 this._hookAgent(provider)));
@@ -485,7 +522,7 @@ export class Controller {
             else if (name === 'updates')
                 this._syncUpdates();
             else if (name === 'media')
-                this._daemon.call('media', 'SetLyrics', this._settings.get_boolean('lyrics-online'));
+                this._syncLyrics();
             else if (name === 'agents')
                 this._syncAgents(true);
         });
@@ -493,6 +530,8 @@ export class Controller {
         daemon.connect('agent-asking', (_daemon, request) => this._onAgentAsking(request));
         daemon.connect('agent-withdrawn', (_daemon, id) => this._withdrawAlert(`agent-ask:${id}`));
         // A command that ended while nobody watched (isled restarted, or the user was logged out).
+        daemon.connect('model-switched', (_daemon, provider, plan, picked, used) =>
+            this._post(Alerts.modelSwitched(provider, plan, picked, used)));
         daemon.connect('assistant-notice', (_daemon, text, ok) =>
             this._post(Alerts.assistant(ok ? {phase: 'reply', reply: text} : {phase: 'error', error: text},
                 () => this._openVoice({typing: true}))));
@@ -504,8 +543,7 @@ export class Controller {
                 this._agentsUnsynced ? this._syncAgents() : this._hookNewAgents();
         });
         this._settingsChanged.push(this._settings.connect('changed::check-updates', () => this._syncUpdates()));
-        this._settingsChanged.push(this._settings.connect('changed::lyrics-online', () =>
-            this._daemon.call('media', 'SetLyrics', this._settings.get_boolean('lyrics-online'))));
+        this._settingsChanged.push(this._settings.connect('changed::lyrics-online', () => this._syncLyrics()));
         this._voice.connect('orb-clicked', () => this._onVoiceKey());
         // The × on an answer or an alert puts it away, as a click on the answer or a right click on the alert does.
         this._voice.connect('close-requested', () => this.collapse());
@@ -575,14 +613,21 @@ export class Controller {
             }, this._sharing));
         });
         notifications.connect('dnd-changed', () => (this._compact.doNotDisturb = notifications.dnd));
-        notifications.connect('changed', () => (this._compact.unseenNotifications = notifications.unseenCount > 0));
-        notifications.connect('seen-changed', () => (this._compact.unseenNotifications = notifications.unseenCount > 0));
+        notifications.connect('changed', () => this._syncUnseen());
+        notifications.connect('seen-changed', () => this._syncUnseen());
         this._compact.doNotDisturb = notifications.dnd;
-        this._compact.unseenNotifications = notifications.unseenCount > 0;
+        this._syncUnseen();
+    }
+
+    /** The unread dot, unless the Notifications page it leads to is left out. */
+    _syncUnseen() {
+        this._compact.unseenNotifications = this._notifications.unseenCount > 0 &&
+            !this._settings.get_strv('hidden-pages').includes('notifications');
     }
 
     // Layout
 
+    /** Places the island on its display, in or under the top bar, then redraws it. */
     _updateGeometry() {
         const before = this._monitor;
         this._monitor = this._wantedMonitor();
@@ -596,6 +641,37 @@ export class Controller {
         this._render();
         if (this._monitor !== before)
             this._syncFullscreen();
+        this._syncScanout();
+    }
+
+    /** GNOME sends a window covering the whole display straight to the screen, hiding the island that still
+     * takes the pointer. Painting stays on while both show, as for GNOME's own menus and OSDs. */
+    _syncScanout() {
+        const inhibit = !this._destroying && this._island.visible && this._windowCoversDisplay();
+        if (inhibit === Boolean(this._scanoutInhibited))
+            return;
+        this._scanoutInhibited = inhibit;
+        inhibitScanout(inhibit);
+    }
+
+    /** Whether the top window on the island's display covers all of it with no top bar drawn there. The top one
+     * only, as GNOME picks: not the desktop's own (Ubuntu's desktop icons cover the display under every window). */
+    _windowCoversDisplay() {
+        const monitor = this._monitor;
+        if (!monitor)
+            return false;
+        const panelBox = Main.layoutManager.panelBox;
+        if (this._onBar && panelBox.mapped && panelBox.get_transformed_position()[1] >= monitor.y)
+            return false;
+        const workspace = global.workspace_manager.get_active_workspace();
+        const top = global.get_window_actors().map(actor => actor.meta_window).reverse().find(window =>
+            !window.minimized && window.get_monitor() === monitor.index && window.located_on_workspace(workspace) &&
+            window.get_window_type() !== Meta.WindowType.DESKTOP && !window.is_skip_taskbar() && !window.customJS_ding);
+        if (!top)
+            return false;
+        const rect = top.get_frame_rect();
+        return rect.x <= monitor.x && rect.y <= monitor.y && rect.x + rect.width >= monitor.x + monitor.width &&
+            rect.y + rect.height >= monitor.y + monitor.height;
     }
 
     // GNOME hides the island under a fullscreen window only when fullscreen changes, not when it moves
@@ -635,6 +711,24 @@ export class Controller {
     _syncEventAlerts() {
         const minutes = this._settings.get_boolean('event-alerts') ? this._settings.get_int('event-alert-minutes') : 0;
         this._expanded.pageNamed('calendar').alarmLead = minutes;
+    }
+
+    /** The pages left out in Settings lose their tabs; the Calendar page's world clocks as Settings say. */
+    _syncPages() {
+        const hidden = this._settings.get_strv('hidden-pages');
+        for (const page of this._expanded.pages) {
+            if (page.name !== 'call' && page.name !== 'usage')
+                page.hidden = hidden.includes(page.name);
+        }
+        this._syncUnseen();
+        this._syncLyrics();
+        this._expanded.pageNamed('calendar').worldClocks = this._settings.get_boolean('world-clocks');
+    }
+
+    /** Lyrics are looked up online only for the Music page, and only while it is in the island. */
+    _syncLyrics() {
+        this._daemon.call('media', 'SetLyrics', this._settings.get_boolean('lyrics-online') &&
+            !this._settings.get_strv('hidden-pages').includes('music'));
     }
 
     /** An event starts soon: an alert, with Join when the event has a meeting link. Not in Do Not Disturb. */
@@ -710,9 +804,14 @@ export class Controller {
         this._post(Alerts.agentRefused(provider, error));
     }
 
-    /** Claude Code or Codex needs the user, or is done: an alert, unless its window is the one in front. */
+    /** Whether alerts are on for `provider`. Grok runs Claude's hooks, so it follows Claude's switch. */
+    _alertsOn(provider) {
+        return this._settings.get_boolean(`agent-alerts-${provider === 'grok' ? 'claude' : provider}`);
+    }
+
+    /** Claude Code, Codex or Grok needs the user, or is done: an alert, unless its window is the one in front. */
     _onAgentEvent(event) {
-        if (!this._settings.get_boolean(`agent-alerts-${event.provider}`) || this._notifications.dnd)
+        if (!this._alertsOn(event.provider) || this._notifications.dnd)
             return;
         // A permission the island asked for itself needs no second alert; one it could not ask (a long
         // command, too many waiting) does. Its ask may come a moment after this.
@@ -736,9 +835,8 @@ export class Controller {
         this._post(event.kind === 'done' ? Alerts.agentDone(event, this._botLook, show) : Alerts.agent(event, show));
     }
 
-    /** The window (a terminal, VS Code) the agent runs in: the one whose process is among the hook's parents
-     * (`pids`); else, with none of them, the latest used whose title names the project as a word of its own.
-     * Null when it can't be told, so nothing is held back or sent there by mistake. */
+    /** The window (a terminal, VS Code) the agent runs in: one of the hook's parent processes (`pids`), else the
+     * latest whose title names the project. Null when unsure, so nothing is held back or sent there by mistake. */
     _agentWindow({project, pids}) {
         const windows = global.get_window_actors().map(actor => actor.meta_window);
         const named = window => namesProject(window.get_title() ?? '', project);
@@ -756,6 +854,7 @@ export class Controller {
         return windows.filter(named).sort((a, b) => b.get_user_time() - a.get_user_time())[0] ?? null;
     }
 
+    /** Sizes and shapes the island for what it shows now: the assistant, the pages, an alert, or nothing. */
     _render() {
         if (this._destroying)
             return;
@@ -832,16 +931,14 @@ export class Controller {
         this._shelfHelper.sync();
     }
 
-    /**
-     * Lays out ahead, while closed and a step at a time, what would otherwise be styled and laid out in the
-     * frames that show it: the pages that changed out of sight, and with `all` the alerts' and voice's views.
-     */
+    /** Lays out ahead, closed and a step at a time, what the frames showing it would otherwise style and lay
+     * out: the pages changed out of sight, and with `all` the alert and voice views. */
     _warmUp(all) {
         const island = this._island;
         const expanded = this._expanded;
         if (!island.mapped)
             return;
-        const pages = expanded.pages.filter(page => page.cold);
+        const pages = expanded.pages.filter(page => page.cold && !page.hidden);
         // The voice view only while the assistant is turned on.
         const steps = [];
         if (all) {
@@ -899,7 +996,7 @@ export class Controller {
     /** Lays out the pages that changed out of sight, once the island has rested closed a while. */
     _scheduleWarm() {
         if (this._presentation !== 'compact' || !this._island.mapped || this._timeouts.has('warm') ||
-            !this._expanded.pages.some(page => page.cold))
+            !this._expanded.pages.some(page => page.cold && !page.hidden))
             return;
         const sinceLast = GLib.get_monotonic_time() / 1000 - (this._warmedAt ?? -Infinity);
         this._later('warm', Math.max(WARM_AFTER_CLOSE_MS, WARM_GAP_MS - sinceLast), () => this._warmUp(false));
@@ -911,6 +1008,7 @@ export class Controller {
             palette: paletteFor(this._settings.get_string('bot-color'), this._settings.get_string('bot-glow'))};
     }
 
+    /** Settings changed the bot: the voice view and the island's glow follow. */
     _syncBotLook() {
         this._botLook = this._readBotLook();
         this._voice.look = this._botLook;
@@ -918,6 +1016,7 @@ export class Controller {
         this._syncTint();
     }
 
+    /** The island's colours for what it shows: the bot's glow, an alert's, or the open page's tint. */
     _syncTint() {
         const expanded = this._presentation === 'expanded';
         const voice = this._presentation === 'voice';
@@ -941,6 +1040,7 @@ export class Controller {
         return this._island.hovered && !this._hoverUnmoved;
     }
 
+    /** The pointer came or went: holds or times out alerts and answers, and opens or closes the island. */
     _onHoverChanged(moved = false) {
         const unmoved = this._hoverUnmoved;
         this._hoverUnmoved = false;
@@ -1015,7 +1115,13 @@ export class Controller {
     get _alertHoldsHover() {
         const alert = this._alert;
         return this._presentation === 'peek' &&
-            Boolean(alert?.action || alert?.actions?.length || (alert?.onActivate && !alert.page));
+            Boolean(alert?.action || alert?.actions?.length || (alert?.onActivate && !this._alertPage));
+    }
+
+    /** The page the alert shown opens, unless that page is left out in Settings. */
+    get _alertPage() {
+        const page = this._alert?.page;
+        return page && !this._expanded.pageNamed(page)?.hidden ? page : null;
     }
 
     // Opens once the pointer rests on the island, so passing over it along the top bar opens nothing.
@@ -1058,6 +1164,7 @@ export class Controller {
         });
     }
 
+    /** Closes, unless the pointer is on the shelf helper's window over the island. */
     _collapseUnlessHeld() {
         // The shelf helper window covers the island; the pointer may be on it.
         if (this._shelfHelper.containsPointer()) {
@@ -1149,6 +1256,7 @@ export class Controller {
         return result;
     }
 
+    /** Left opens or acts, middle plays or pauses, right puts an alert away or brings the call or player forward. */
     _onClick(event, button = event.get_button()) {
         // A click puts an answer away; the face and the Sign in button take their own clicks.
         if (this._voiceOpen) {
@@ -1200,7 +1308,7 @@ export class Controller {
         // A close still pending (the pointer just left) would shut it again.
         this._cancel('expand');
         this._cancel('collapse');
-        const target = pageName ?? this._alert?.page ?? this._defaultPage();
+        const target = pageName ?? this._alertPage ?? this._defaultPage();
         if (target)
             this._expanded.showPage(target, {animate: this._expandWanted});
         // Opening the island takes over from the alert being shown; one asking for an answer waits its turn.
@@ -1215,6 +1323,7 @@ export class Controller {
         this._render();
     }
 
+    /** Closes the open island or the assistant, then shows what waited. */
     collapse() {
         if (this._destroying)
             return;
@@ -1238,7 +1347,8 @@ export class Controller {
     _defaultPage() {
         if (Date.now() - this._pagePickedAt < PAGE_MEMORY_MS)
             return null; // stay on the current page
-        return DEFAULT_PAGE_ORDER.find(name => this._expanded.pageNamed(name)?.relevant) ?? 'music';
+        const page = DEFAULT_PAGE_ORDER.map(name => this._expanded.pageNamed(name)).find(p => p?.available && p.relevant);
+        return page?.name ?? this._expanded.pages.find(p => p.available)?.name ?? null;
     }
 
     // Keyboard
@@ -1347,10 +1457,14 @@ export class Controller {
         this._post(alert);
     }
 
+    /** Queues `alert`, replacing one with its key; past a few waiting notifications, they merge into a summary. */
     _enqueue(alert) {
         this._queue = this._queue.filter(queued => queued.key !== alert.key);
         this._queue.push(alert);
         // Many notifications waiting (a long fullscreen video) come as one; each stays unread in the list.
+        // With no list (the Notifications page left out), each comes on its own, to be read and clicked.
+        if (this._expanded.pageNamed('notifications').hidden)
+            return;
         const waiting = this._queue.filter(queued => queued.kind === 'notification' && queued.priority !== 'instant');
         const summary = this._queue.find(queued => queued.key === 'notifications-summary');
         if (waiting.length > (summary ? 0 : MAX_QUEUED_NOTIFICATIONS)) {
@@ -1409,6 +1523,7 @@ export class Controller {
         this._later('alert', alert.duration ?? 3000, () => this._dismissAlert(true));
     }
 
+    /** Puts the alert away; with `showNext`, the next in line comes on. */
     _dismissAlert(showNext) {
         this._cancel('alert');
         // Put away without an answer, it says so (an agent then asks in its terminal).
@@ -1447,6 +1562,7 @@ export class Controller {
         }
     }
 
+    /** Shows the first alert in line that still has something to say, once nothing else is on screen. */
     _nextAlert() {
         // One shows already (the command asked as the assistant closed): the queue waits behind it.
         if (this._alert || !this._island.visible || this._expandWanted || this._voiceOpen || !this._queue.length) {
@@ -1465,6 +1581,7 @@ export class Controller {
         this._render();
     }
 
+    /** Volume or brightness as an alert in place of GNOME's OSD; false lets GNOME show its own. */
     _showOsd(icon, label, level, maxLevel) {
         if (!this._settings.get_boolean('replace-osd') || !this._island.visible)
             return false;
@@ -1485,13 +1602,14 @@ export class Controller {
         return true;
     }
 
+    /** A new song that starts playing peeks in, if Settings want that. */
     _onNowPlaying() {
         const nowPlaying = this._daemon.state.nowPlaying;
         const track = Playback.hasTrack(nowPlaying) ? `${nowPlaying.title}\u001f${nowPlaying.artist}` : null;
         const changed = track !== this._lastTrack;
         this._lastTrack = track;
         if (changed && track && Playback.isPlaying(nowPlaying) && this._settings.get_boolean('track-peek') &&
-            !this._notifications.dnd)
+            !this._notifications.dnd && !this._expanded.pageNamed('music').hidden)
             this._post(Alerts.track(nowPlaying));
     }
 
@@ -1522,6 +1640,7 @@ export class Controller {
         return this._privacy.screenShare || this._privacy.recording;
     }
 
+    /** While others can see the screen, private text leaves the shelf, the notifications and the alert shown. */
     _syncSharing() {
         this._shelf.sharing = this._sharing;
         this._expanded.pageNamed('notifications').sharing = this._sharing;
@@ -1535,6 +1654,7 @@ export class Controller {
 
     // Updates
 
+    /** Tells isled whether to look for new versions. */
     _syncUpdates() {
         this._daemon.call('updates', 'SetEnabled', this._settings.get_boolean('check-updates'));
     }
@@ -1545,8 +1665,15 @@ export class Controller {
         if (!latest || latest === this._settings.get_string('update-shown') || this._notifications.dnd)
             return;
         this._settings.set_string('update-shown', latest);
-        this._post(Alerts.update(latest, () => Gio.AppInfo.launch_default_for_uri(UPDATE_HELP,
-            global.create_app_launch_context(0, -1)), this._extension.path.startsWith('/usr/')));
+        // Settings' About page has the Update button (or, for a package, how to update it).
+        const packaged = this._extension.path.startsWith('/usr/');
+        const open = () => {
+            this._settings.set_string('prefs-page', 'about');
+            this._extension.openPreferences();
+        };
+        // Both: the alert in the notch, and a notification to find again in the list.
+        this._post(Alerts.update(latest, open, packaged));
+        this._notifications.announceUpdate(latest, open, packaged);
     }
 
     // Usage
@@ -1557,6 +1684,9 @@ export class Controller {
             enabled: this._settings.get_boolean('usage-enabled'),
             claude: this._settings.get_boolean('usage-claude'),
             codex: this._settings.get_boolean('usage-codex'),
+            grok: this._settings.get_boolean('usage-grok'),
+            // Off, a plan seen there starts no AI to list its models.
+            assistant: this._settings.get_boolean('voice-assistant'),
             warn: this._settings.get_int('usage-warn'),
             critical: this._settings.get_int('usage-critical'),
         };
@@ -1695,7 +1825,7 @@ export class Controller {
                 {apps: this._installedApps.names, selectedIn: this._selectedIn});
         } catch (e) {
             console.warn(`Isle: could not gather the request's context: ${e.message}`);
-            json = JSON.stringify({...aiSettings(this._settings), actions: actionTypes()});
+            json = JSON.stringify({...aiSettings(this._settings), actions: actionTypes(this._settings)});
         }
         if (this._voiceOpen && request === this._listenRequest)
             this._sendRequest(request, 'Ask', text, json);
@@ -1768,6 +1898,7 @@ export class Controller {
         return Format.shortcutLabel(this._settings.get_strv('voice-shortcut')[0] ?? '');
     }
 
+    /** How to ask again, under an error: the shortcut, if there is one. */
     get _askAgainHint() {
         return this._voiceShortcut ? `Press ${this._voiceShortcut} to ask again.` : 'Ask again from the mic in the island.';
     }
@@ -1782,6 +1913,7 @@ export class Controller {
         this._compact.assistantBusy = this._voiceWorking;
     }
 
+    /** Shows "Listening…" and sends isled a Listen with the request's context; `greet` for a conversation's first. */
     async _listen({greet = false} = {}) {
         this._voiceByHover = false;
         this._askedTyped = false;
@@ -1813,7 +1945,7 @@ export class Controller {
             console.warn(`Isle: could not gather the request's context: ${e.message}`);
             json = JSON.stringify({
                 ...aiSettings(this._settings),
-                actions: actionTypes(),
+                actions: actionTypes(this._settings),
                 whisper_model: this._settings.get_string('voice-speech-model'),
                 language: this._settings.get_string('voice-language'),
             });
@@ -1825,6 +1957,7 @@ export class Controller {
         }
     }
 
+    /** Follows isled's assistant: shows each phase, runs the answer's actions, and closes or alerts once done. */
     _onAssistant() {
         const state = this._daemon.state.assistant;
         if (!state)
@@ -1944,6 +2077,7 @@ export class Controller {
         return Array.isArray(this._daemon.state.chat) ? this._daemon.state.chat : [];
     }
 
+    /** The conversation changed; one brought back by Undo opens again. */
     _onHistory() {
         this._voice.setHistory(this._history);
         if (this._openWhenBack) {
@@ -1962,6 +2096,7 @@ export class Controller {
         this._later('chat-undo', UNDO_MS, () => this._voice.showUndo(false));
     }
 
+    /** Asks isled for the old conversation back, opening it when it comes (see `_onHistory`). */
     _undoNewChat() {
         this._openWhenBack = true;
         // Not back by then (isled busy, or it dropped it), it never pops open on a later change.
@@ -1995,6 +2130,7 @@ export class Controller {
         });
     }
 
+    /** Run or Deny for the command, as an alert while the island is closed. */
     _askInAlert(action) {
         // Its buttons answer its own command, never one asked after it.
         this._post(Alerts.taskAsks(action, this._botLook, run => this._deciding?.action === action && this._deciding.done(run)));
@@ -2020,7 +2156,7 @@ export class Controller {
         }
         this._askedAt.set(`${request.provider}:${request.session}`, now);
         const pass = () => this._daemon.call('agents', 'Resolve', request.id, '');
-        if (!this._settings.get_boolean(`agent-alerts-${request.provider}`) || this._notifications.dnd ||
+        if (!this._alertsOn(request.provider) || this._notifications.dnd ||
             !this._island.visible)
             return pass();
         const window = this._agentWindow(request);
@@ -2074,6 +2210,7 @@ export class Controller {
         this._scheduleVoiceClose(VOICE_ERROR_MS);
     }
 
+    /** Closes an answer after `ms`, unless the pointer is on it or the conversation is open. */
     _scheduleVoiceClose(ms) {
         this._voiceCloseMs = ms;
         // An action may have closed it already; an open conversation stays until put away.
@@ -2094,6 +2231,9 @@ export class Controller {
             decide: action => this._decide(action),
             // The answer shows for a moment, then the page.
             showNotifications: () => this._later('voice-page', 1200, () => {
+                // Left out in Settings meanwhile: the answer stays.
+                if (this._expanded.pageNamed('notifications').hidden)
+                    return;
                 this.expand('notifications');
                 if (!this._island.hovered && !this._keyboardGrab)
                     this._holdOpen();
@@ -2135,6 +2275,7 @@ export class Controller {
         this._daemon.call('assistant', 'End');
     }
 
+    /** Plays a theme sound, if chimes are on. */
     _chime(soundName) {
         if (this._settings.get_boolean('chimes'))
             global.display.get_sound_player().play_from_theme(soundName, 'Isle', null);
@@ -2142,6 +2283,7 @@ export class Controller {
 
     // Idle
 
+    /** Marks the user away after a minute without input (sooner on battery), so animations rest. */
     _watchIdle() {
         const monitor = global.backend.get_core_idle_monitor();
         const rest = () => {
@@ -2168,6 +2310,7 @@ export class Controller {
 
     // Timeouts
 
+    /** Runs `callback` after `ms`, replacing a pending one of the same name; nothing once tearing down. */
     _later(name, ms, callback) {
         if (this._destroying)
             return;
@@ -2179,6 +2322,7 @@ export class Controller {
         }));
     }
 
+    /** Drops the named timeout, if pending. */
     _cancel(name) {
         const id = this._timeouts.get(name);
         if (id) {
@@ -2187,6 +2331,7 @@ export class Controller {
         }
     }
 
+    /** Turns Isle off: agents' asks go back to their terminals, then all it built is torn down. */
     destroy() {
         // Failed to start: what it built went then.
         if (this._failed)
@@ -2204,6 +2349,7 @@ export class Controller {
         this._queue = [];
         Alerts.stopWatching();
         global.display.get_selection().disconnect(this._primaryChanged);
+        Main.layoutManager.uiGroup.disconnect(this._panelAdded);
         global.display.disconnect(this._focusChanged);
         global.display.disconnect(this._focusMonitorChanged);
         stopPending();
@@ -2229,6 +2375,7 @@ export class Controller {
 
         this._settingsChanged.forEach(id => this._settings.disconnect(id));
         Main.layoutManager.disconnect(this._monitorsChanged);
+        this._releaseScanout();
         this._osd.destroy();
         this._keyboard.destroy();
         this._shelfHelper.destroy();
@@ -2252,6 +2399,23 @@ export class Controller {
         Format.release();
     }
 
+    /** Lets GNOME send windows straight to the screen again, as it was before Isle (see `_syncScanout`). */
+    // Hide Top Bar adds the bar again, over the island, which then never gets the pointer: put it back below.
+    _keepAbovePanel() {
+        const group = Main.layoutManager.uiGroup;
+        const children = group.get_children();
+        if (children.indexOf(Main.layoutManager.panelBox) > children.indexOf(this._island))
+            group.set_child_below_sibling(Main.layoutManager.panelBox, this._island);
+    }
+
+    _releaseScanout() {
+        this._scanoutWatches?.forEach(([source, id]) => source.disconnect(id));
+        this._scanoutWatches = null;
+        if (this._scanoutInhibited)
+            inhibitScanout(false);
+        this._scanoutInhibited = false;
+    }
+
     /** Frees what the steps of building (see the constructor) made before it was turned off: nothing
      * outside knows of it yet, but for what it built. */
     _destroyPartial() {
@@ -2263,6 +2427,8 @@ export class Controller {
         stopPending();
         if (this._primaryChanged)
             global.display.get_selection().disconnect(this._primaryChanged);
+        if (this._panelAdded)
+            Main.layoutManager.uiGroup.disconnect(this._panelAdded);
         for (const id of [this._focusChanged, this._focusMonitorChanged].filter(Boolean))
             global.display.disconnect(id);
         if (this._voiceBound)
@@ -2274,6 +2440,7 @@ export class Controller {
         this._settingsChanged?.forEach(id => this._settings.disconnect(id));
         if (this._monitorsChanged)
             Main.layoutManager.disconnect(this._monitorsChanged);
+        this._releaseScanout();
         for (const part of [this._osd, this._keyboard, this._reminders, this._installedApps])
             part?.destroy();
         this._shelfHelper?.destroy();

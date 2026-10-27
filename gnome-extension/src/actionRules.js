@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 // The assistant's rules that need nothing of GNOME, kept apart so tests run them anywhere (tests/).
 
@@ -7,6 +8,7 @@ export function describeActions(actions = []) {
     const [first] = actions;
     if (!first)
         return 'Working…';
+    // On unless the action says off.
     const turning = (name, on) => `Turning ${name} ${on === false ? 'off' : 'on'}…`;
     const what = {
         open_app: `Opening ${first.app ?? 'the app'}…`,
@@ -52,11 +54,8 @@ export const RUN_WRAPPER = '( eval "$1" ); printf \'\\n[isle-exit %d]\\n\' "$?"'
 /** As root: the same, its output written to the log by the user ($2, $3) rather than root. */
 export const ROOT_WRAPPER = `{ ${RUN_WRAPPER}; } 2>&1 | chroot --userspec="$2:$3" / tee -a -- "$4" >/dev/null`;
 
-/**
- * Whether `action` (a command the AI wants run, as isled hands it over) starts what its card shows and no
- * more: `systemd-run` with Isle's own options, its log in Isle's cache, and the shown command last. Isle
- * starts nothing else, even if something posed as isled on the bus. `user`: {home, cache, uid, gid}.
- */
+/** Whether `action` starts exactly what its card shows: `systemd-run` with Isle's own options, its log in Isle's
+ * cache, the shown command last. Nothing else starts, even if something posed as isled on the bus. */
 export function runnable(action, {home, cache = `${home}/.cache`, uid, gid}) {
     const argv = action?.spawn;
     if (!Array.isArray(argv) || argv[0] !== 'systemd-run' || typeof action.command !== 'string')
@@ -91,6 +90,7 @@ export function runnable(action, {home, cache = `${home}/.cache`, uid, gid}) {
 // the folders of their programs first (home, nvm, Homebrew…); as root, nothing the user can write.
 const SYSTEM_PATH = ['/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin', '/snap/bin'];
 
+/** A PATH option passes only as the system's folders, after the user's own absolute ones (none as root). */
 function pathAllowed(option, root) {
     if (!option.startsWith('--setenv=PATH='))
         return false;
@@ -126,6 +126,7 @@ export function stoppable(argv) {
         argv.at(-2) === 'stop' && /^isle-run-[\w-]+$/.test(argv.at(-1));
 }
 
+/** `text` escaped to match itself inside a RegExp. */
 const literal = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 // Parts of the screen's work area, as [x, y, width, height] shares of it: where one window goes...

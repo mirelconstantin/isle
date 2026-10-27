@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 // Notifications: a heading with Do Not Disturb and Clear (and, while it is on, what still gets through),
 // over a list of one-line rows, newest first. Click one to open it. See docs/product-spec.md.
@@ -29,8 +30,10 @@ function notificationBadge(gicon) {
     });
 }
 
+/** The page over `center`, which keeps the notifications and Do Not Disturb. */
 export const NotificationsPage = GObject.registerClass(
 class NotificationsPage extends Page {
+    /** The list itself is built late, on the first warm-up or showing. */
     _init(daemon, center, {height}) {
         super._init(daemon, {
             style_class: 'isle-page isle-notifications',
@@ -39,7 +42,6 @@ class NotificationsPage extends Page {
         });
         this.name = 'notifications';
         this._center = center;
-        /** Apps whose stack of notifications is unfolded. */
 
         this.add_child(this._buildBar());
         this.add_child(this._buildDndNote());
@@ -61,10 +63,12 @@ class NotificationsPage extends Page {
         this.connect('destroy', () => this._onDestroy());
     }
 
+    /** Unseen notifications make it the page to open on. */
     get relevant() {
         return this._center.hasUnseen;
     }
 
+    /** Unseen ones put a dot on the tab. */
     get hasNews() {
         return this._center.hasUnseen;
     }
@@ -96,6 +100,7 @@ class NotificationsPage extends Page {
         return this._dndNote;
     }
 
+    /** The scrolling list of rows, with "No notifications" in its place when empty. */
     _buildList() {
         this._list = new St.BoxLayout({...VERTICAL, style_class: 'isle-notification-list'});
         this._scroll = new St.ScrollView({
@@ -119,6 +124,7 @@ class NotificationsPage extends Page {
         return column;
     }
 
+    /** Rebuilds now if shown, or marks the list stale for the next showing. */
     _onListChanged({seen = true} = {}) {
         if (this.active)
             this._update({seen});
@@ -128,6 +134,7 @@ class NotificationsPage extends Page {
         this.emit('news-changed');
     }
 
+    /** Rebuilds every row; `seen` false leaves them unread even while shown. */
     _update({seen = true} = {}) {
         this._stale = false;
         /** Each row's "5m ago", with when it came, to bring up to date without a rebuild. */
@@ -147,6 +154,7 @@ class NotificationsPage extends Page {
             this._center.acknowledgeAll();
     }
 
+    /** The bell turns into a checked moon, and the note shows, while Do Not Disturb is on. */
     _updateDnd() {
         const on = this._center.dnd;
         if (on)
@@ -214,6 +222,7 @@ class NotificationsPage extends Page {
         return row;
     }
 
+    /** Builds the list ahead, if it is out of date. */
     warmUp() {
         if (this._stale)
             this._update();
@@ -231,6 +240,7 @@ class NotificationsPage extends Page {
         this.markCold();
     }
 
+    /** Opening the page counts as seeing them all. */
     onActivate() {
         this._center.acknowledgeAll();
         // Rebuilt only if something came or went while it was closed; else just the times move on.
@@ -240,6 +250,7 @@ class NotificationsPage extends Page {
             this._times.forEach(([time, datetime]) => (time.text = Format.ago(datetime)));
     }
 
+    /** Lets go of the notification center's signals. */
     _onDestroy() {
         this._centerHandlers.forEach(id => this._center.disconnect(id));
     }

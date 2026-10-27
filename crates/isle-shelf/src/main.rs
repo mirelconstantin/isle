@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 //! `isle-shelf`: the shelf's drag-and-drop window, as Shell widgets can't DnD with apps.
 //! An X11 override-redirect window: the only kind GNOME Shell stacks above the island.
@@ -17,6 +18,7 @@ use crate::shelf::ShelfWindow;
 
 const APP_ID: &str = "io.github.zickrian.isle.ShelfWindow";
 
+/// Starts the GTK app on X11 and the CPU renderer, then waits for D-Bus calls.
 fn main() -> glib::ExitCode {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     // SAFETY: called before GTK starts and before any other thread exists.
@@ -59,6 +61,7 @@ fn main() -> glib::ExitCode {
     app.run()
 }
 
+/// Exports the shelf window's D-Bus interface, then takes the bus name; quits if it is taken.
 fn start_service(app: &gtk::Application) -> Result<(), glib::Error> {
     let connection = gio::bus_get_sync(gio::BusType::Session, None::<&gio::Cancellable>)?;
     service::register(&connection, ShelfWindow::new(app))?;
@@ -77,6 +80,7 @@ fn start_service(app: &gtk::Application) -> Result<(), glib::Error> {
     Ok(())
 }
 
+/// Applies the shelf's stylesheet to the whole display.
 fn load_css() {
     let provider = gtk::CssProvider::new();
     provider.load_from_string(include_str!("style.css"));

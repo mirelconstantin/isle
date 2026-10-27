@@ -51,9 +51,9 @@ Type is set in Inter (installed with Isle), semibold for titles, nothing heavier
 tracking on large figures. The island's text fields keep their own look
 when Blur my Shell restyles the shell's.
 
-The bar can also be black, so that bar and island read as one shape: the
-shoulders then curve out of the bar's lower edge instead of the screen's
-top. The installer sets glass (and the slim
+A slider takes the bar from glass to black; the island stays black. All
+the way to black, bar and island read as one shape: the shoulders then curve
+out of the bar's lower edge instead of the screen's top. The installer sets glass (and the slim
 bar) on every install, turns off Blur my Shell's top bar blur (it darkens
 the bar), and turns off
 extensions that take the island's place. Isle adds its colour to the bar's

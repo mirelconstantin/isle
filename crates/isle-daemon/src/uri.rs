@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 //! The local path a `file://` URI names (RFC 8089), its `%XX` escapes decoded.
 
@@ -58,6 +59,7 @@ fn decode(text: &str) -> Vec<u8> {
     decoded
 }
 
+/// The value of one hex digit, either case.
 fn hex_digit(byte: u8) -> Option<u8> {
     char::from(byte).to_digit(16).map(|digit| digit as u8)
 }

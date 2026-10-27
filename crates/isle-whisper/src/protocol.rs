@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 //! What isled and the helper say to each other, one JSON object a line: `{"ready", "device"}` once
 //! the model is loaded, then for each request `{"audio": path}` a `{"text"}` or an `{"error"}`.
@@ -26,14 +27,17 @@ pub fn samples(bytes: &[u8]) -> Vec<f32> {
         .collect()
 }
 
+/// Sent once the model is loaded, naming the device it runs on.
 pub fn ready(device: &str) -> String {
     json!({"ready": true, "device": device}).to_string()
 }
 
+/// A request's transcript.
 pub fn text(text: &str) -> String {
     json!({"text": text}).to_string()
 }
 
+/// Why a request or the start failed.
 pub fn error(error: &str) -> String {
     json!({"error": error}).to_string()
 }

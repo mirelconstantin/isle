@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
-// Focus timer (Pomodoro), the Focus page: a ring with the time left, the lengths of work and break, and
-// Start. See docs/product-spec.md.
+// Focus timer (Pomodoro), the Focus page. See docs/product-spec.md.
 
 import Clutter from 'gi://Clutter';
 import GObject from 'gi://GObject';
@@ -34,6 +34,7 @@ const STEPPERS = [
 // The Focus page: a ring with the time left, the lengths of work and break as steppers, and Start.
 export const TimerPage = GObject.registerClass(
 class TimerPage extends Page {
+    /** `height` is the expanded island's page height. */
     _init(daemon, {height}) {
         super._init(daemon, {
             style_class: 'isle-page isle-timer',
@@ -101,6 +102,7 @@ class TimerPage extends Page {
         return row;
     }
 
+    /** One stepper click, kept within `min`..`max` minutes. */
     _step(key, step, min, max) {
         // From what was last asked for: clicks faster than isled answers each count.
         const config = this._asked ?? this.daemon.state.pomodoroConfig;
@@ -115,6 +117,7 @@ class TimerPage extends Page {
         this.daemon.call('pomodoro', 'SetConfig', JSON.stringify(this._asked));
     }
 
+    /** Steppers show isled's lengths, or the clicks it hasn't answered yet. */
     _syncSteppers() {
         const config = this.daemon.state.pomodoroConfig;
         // isled has caught up with the clicks (or another change came): its config holds again.
@@ -125,16 +128,19 @@ class TimerPage extends Page {
             this._values.get(key).text = shown?.[key] !== undefined ? String(shown[key]) : '–';
     }
 
+    /** Only once a session has started. */
     get relevant() {
         const state = this.daemon.state.pomodoro;
         return Boolean(state && state.phase !== 'idle');
     }
 
+    /** Start, Pause or Resume. */
     _toggle() {
         const state = this.daemon.state.pomodoro;
         this.daemon.call('pomodoro', state?.running ? 'Pause' : 'Start');
     }
 
+    /** Ring, time, phase and buttons from isled's timer state. */
     _update() {
         const state = this.daemon.state.pomodoro ?? DEFAULT_STATE;
         const idle = state.phase === 'idle';
@@ -150,6 +156,7 @@ class TimerPage extends Page {
         this._scheduleTick(state);
     }
 
+    /** In ms; counted locally from `ends_at_ms` while running. */
     _remaining(state) {
         return state.running ? Math.max(0, state.ends_at_ms - Format.nowMs()) : state.remaining_ms;
     }
@@ -165,10 +172,12 @@ class TimerPage extends Page {
         this.later('tick', (remaining % 1000) + 15, () => this._update());
     }
 
+    /** The time may be stale after a while off screen. */
     onActivate() {
         this._update();
     }
 
+    /** Forgets unanswered clicks. */
     onDeactivate() {
         // A click isled refused, or a change from Settings meanwhile: what it holds shows next time.
         this._asked = null;

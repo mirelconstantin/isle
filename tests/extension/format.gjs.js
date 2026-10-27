@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 // Formatting that needs GLib but not GNOME Shell: `gjs -m tests/extension/format.gjs.js`.
 
 import {answerPlain, shortcutLabel, weekendDays} from '../../gnome-extension/src/format.js';
 
 let failures = 0;
+// Prints a failure and counts it; JSON compares arrays by value.
 function check(what, actual, expected) {
     if (JSON.stringify(actual) === JSON.stringify(expected))
         return;
@@ -21,6 +23,8 @@ check('weekend with no region', weekendDays('C.UTF-8'), [0, 6]);
 check('bold in an answer', answerPlain('Playing **Late Night Blue** by The Harbor Trio.'), 'Playing Late Night Blue by The Harbor Trio.');
 check('code and a list', answerPlain('Run `sudo apt update`:\n- first\n- second'), 'Run sudo apt update: • first • second');
 check('plain stays', answerPlain('Two things today.'), 'Two things today.');
+check('say json', answerPlain('{"say":"Something."}'), 'Something.');
+check('say json fenced', answerPlain('```json\n{"say":"Hi there."}\n```'), 'Hi there.');
 
 if (failures)
     imports.system.exit(1);

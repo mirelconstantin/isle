@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 // A small copy of the assistant (see bot.js) for alerts and the closed island, with a status badge on its
 // corner. It holds still, moving only for a moment when told to (a hop, a shake), so it costs no frames.
@@ -19,6 +20,7 @@ const SETTLE_S = 0.7;
 /** While at work it blinks and glances this often (ms): alive, at a few frames every few seconds. */
 const ALIVE_MS = 2600;
 
+/** The bot drawn small, with an optional status badge. */
 export const BotIcon = GObject.registerClass(
 class BotIcon extends St.DrawingArea {
     /** `size` in CSS pixels. */
@@ -99,6 +101,7 @@ class BotIcon extends St.DrawingArea {
         this._timeline.start();
     }
 
+    /** Where its eyes turn: a random glance, picked while it is alive. */
     _look() {
         return this._glance;
     }
@@ -110,6 +113,7 @@ class BotIcon extends St.DrawingArea {
             this._bot.step(from + t, this._look());
     }
 
+    /** Draws the bot, then the badge on top. */
     _paint(area) {
         const cr = area.get_context();
         this._bot.paint(cr, px(this._size));

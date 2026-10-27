@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 // The call going on, with FaceTime-like controls: a live preview of the call's window (you and
 // whoever you call), its app and duration, mute, and a way back. It only has a tab during a call.
@@ -38,6 +39,7 @@ function roundedRect(cr, x, y, width, height, radius) {
 // and the copy only exists while it is shown. Without one it shows the app's icon.
 const WindowPreview = GObject.registerClass(
 class WindowPreview extends St.Widget {
+    /** Builds the stacked layers: copy, icon placeholder, corners and hover mark. */
     _init() {
         super._init({
             style_class: 'isle-call-preview',
@@ -108,6 +110,7 @@ class WindowPreview extends St.Widget {
         this._hover.ease({opacity: hovered ? 255 : 0, duration: 150});
     }
 
+    /** Starts the live copy and follows the window as it moves or resizes. */
     _attach(window) {
         const actor = window.get_compositor_private();
         if (!actor)
@@ -122,6 +125,7 @@ class WindowPreview extends St.Widget {
         this._layout();
     }
 
+    /** Drops the copy and every signal on the window. */
     _detach() {
         this._windowIds.forEach(id => this._window.disconnect(id));
         this._windowIds = [];
@@ -160,6 +164,7 @@ class WindowPreview extends St.Widget {
         this.width = px(width);
     }
 
+    /** Black outside the rounded shape, then a faint white edge. */
     _repaintCorners(area) {
         const cr = area.get_context();
         const [width, height] = area.get_surface_size();
@@ -178,8 +183,10 @@ class WindowPreview extends St.Widget {
     }
 });
 
+/** The call page: preview on the left, app, duration and controls on the right. */
 export const CallPage = GObject.registerClass(
 class CallPage extends Page {
+    /** `call` is the call tracker; `privacy` says when the screen is shared or recorded. */
     _init(daemon, call, privacy, settings, {height}) {
         super._init(daemon, {
             style_class: 'isle-page isle-call',
@@ -239,10 +246,12 @@ class CallPage extends Page {
         this.connect('destroy', () => this._onDestroy());
     }
 
+    /** Only during a call. */
     get available() {
         return this._call.active;
     }
 
+    /** During a call, a page worth opening on. */
     get relevant() {
         return this._call.active;
     }
@@ -264,11 +273,13 @@ class CallPage extends Page {
         return {box, button, text};
     }
 
+    /** Raises the call's window and closes the island. */
     _open() {
         this._call.raise();
         this.emit('request-close');
     }
 
+    /** Redraws from the call's state; tells the island when the tab comes or goes. */
     _update() {
         const call = this._call;
         if (call.active !== this._available) {
@@ -321,15 +332,18 @@ class CallPage extends Page {
             this.later('tick', 1000 - (elapsedMs % 1000) + 10, () => this._tick());
     }
 
+    /** Starts the preview and the clock. */
     onActivate() {
         this._update();
     }
 
+    /** Swaps the live copy for the icon. */
     onDeactivate() {
         // The live copy only exists while it is shown.
         this._preview.update({gicon: this._appIcon.gicon});
     }
 
+    /** Lets go of the call and settings signals. */
     _onDestroy() {
         this._call.disconnect(this._callChanged);
         this._settings.disconnect(this._settingsChanged);

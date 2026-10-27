@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 // Clipboard history: hands each copy to isled, which keeps the list (Clipboard1 in docs/dbus-api.md),
 // and puts items back or pastes them. Lives here: only GNOME Shell can read every app's clipboard on Wayland.
@@ -37,6 +38,7 @@ const LATIN_LAYOUTS = ['us', 'gb', 'id', 'de', 'fr', 'es', 'it', 'pt', 'br', 'nl
     'dk', 'fi', 'is', 'pl', 'cz', 'sk', 'hu', 'ro', 'hr', 'si', 'tr', 'ee', 'lv', 'lt', 'ie', 'ca', 'latam', 'au',
     'za', 'nz', 'ph', 'my', 'vn', 'epo'];
 
+/** Whether `window` is a terminal, which pastes with Ctrl+Shift+V. */
 export function isTerminal(window) {
     const app = Shell.WindowTracker.get_default().get_window_app(window);
     const names = [window.get_wm_class(), window.get_wm_class_instance(), app?.get_id()]
@@ -74,7 +76,9 @@ const KEY_LEFTCTRL = 29;
 const KEY_LEFTSHIFT = 42;
 const KEY_V = 47;
 
+/** Watches the clipboard for the history, and puts items back and pastes them. */
 export class ClipboardHistory {
+    /** Watches from the start; `enabled` decides whether a copy is kept. */
     constructor(daemon, settings) {
         this._daemon = daemon;
         this._settings = settings;
@@ -95,10 +99,12 @@ export class ClipboardHistory {
         });
     }
 
+    /** On in Settings, and its Shelf page in the island: nothing kept that can't be seen. */
     get enabled() {
-        return this._settings.get_boolean('clipboard-history');
+        return this._settings.get_boolean('clipboard-history') && !this._settings.get_strv('hidden-pages').includes('shelf');
     }
 
+    /** A copy was made: kept unless it is ours, a secret, or from an app the user left out. */
     _onCopied() {
         if (this._ownCopy) {
             this._ownCopy = false;
@@ -150,6 +156,7 @@ export class ClipboardHistory {
         }
     }
 
+    /** Remembered as the last text, so a password manager clearing it soon after can take it out again. */
     async _addText(text, appId) {
         if (this._destroyed)
             return;
@@ -266,6 +273,7 @@ export class ClipboardHistory {
         }
     }
 
+    /** A timeout that `destroy` removes if it hasn't run. */
     _later(ms, callback) {
         if (this._destroyed)
             return;
@@ -277,6 +285,7 @@ export class ClipboardHistory {
         this._timeouts.add(id);
     }
 
+    /** Stops reading, drops pending timeouts and frees the virtual keyboard. */
     destroy() {
         this._destroyed = true;
         this._cancellable.cancel();
@@ -288,6 +297,7 @@ export class ClipboardHistory {
     }
 }
 
+/** Clipboard bytes as text, UTF-8. */
 function decode(bytes) {
     return new TextDecoder().decode(bytes.get_data() ?? new Uint8Array());
 }

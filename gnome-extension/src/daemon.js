@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 // Client for isled, the Rust service that does the actual work. Each interface's state comes as
 // JSON string properties, parsed here into plain objects on `Daemon.state`.
@@ -11,6 +12,7 @@ import * as Signals from 'resource:///org/gnome/shell/misc/signals.js';
 const BUS_NAME = 'io.github.zickrian.isle.Daemon';
 const OBJECT_PATH = '/io/github/zickrian/isle/Daemon';
 
+// One isled interface's introspection XML.
 const node = (name, body) =>
     `<node><interface name="io.github.zickrian.isle.${name}">${body}</interface></node>`;
 
@@ -135,23 +137,17 @@ const INTERFACES = {
             <method name="ClearChat"/>
             <signal name="Level"><arg name="level" type="d"/></signal>
             <signal name="Notice"><arg name="text" type="s"/><arg name="ok" type="b"/></signal>
+            <signal name="ModelSwitched"><arg name="provider" type="s"/><arg name="plan" type="s"/><arg name="picked" type="s"/><arg name="used" type="s"/></signal>
             <property name="State" type="s" access="read"/>
             <property name="History" type="s" access="read"/>`),
         properties: {State: 'assistant', History: 'chat'},
     },
 };
 
-// Signals: `changed` (key): `state[key]` is new; `pomodoro-finished` (finished, next): phase names;
-// `system-event` (event): see `SystemEvent` in the daemon; `voice-level` (level): the mic, 0..1;
-// `usage-alert` (provider, window, percent, resets_at_ms): an AI plan limit nears its end;
-// `agent-event` (event): Claude Code or Codex needs the user or is done ({provider, kind, project, message});
-// `agent-asking` (request): one asks a permission, to answer with Agents1.Resolve ({id, provider, tool, input…});
-// `agent-withdrawn` (id): that permission needs no answer any more;
-// `assistant-notice` (text, ok): a command the assistant ran ended while nobody watched;
-// `assistant-lost`: isled stopped or restarted, so a request in flight will not be answered;
-// `appeared` (name): interface `name` can be called now (isled started, or started again);
-// `running-changed`: isled came or went (see `running`).
+// Signals: `changed` (key) when `state[key]` is new; `appeared` (interface), `running-changed` and `assistant-lost`
+// (a request in flight dies) as isled comes and goes; isled's own signals, renamed in `_onSignal`.
 export class Daemon extends Signals.EventEmitter {
+    /** Makes a proxy per interface and starts isled if needed. */
     constructor() {
         super();
         /** Parsed state; a key is `null` until the daemon has reported it. */
@@ -173,6 +169,7 @@ export class Daemon extends Signals.EventEmitter {
         this.start();
     }
 
+    /** Called by the bus name watcher. */
     _setRunning(running) {
         if (running === this.running)
             return;
@@ -196,6 +193,7 @@ export class Daemon extends Signals.EventEmitter {
             });
     }
 
+    /** Makes the proxy for interface `name` and keeps its `properties` mirrored in `state`. */
     _connect(name, xml, properties) {
         const DaemonProxy = Gio.DBusProxy.makeProxyWrapper(xml);
         // The proxy is created even while isled is not running, and picks up
@@ -250,6 +248,7 @@ export class Daemon extends Signals.EventEmitter {
         this._held ??= [];
     }
 
+    /** Tells everything kept since `hold`, in order. */
     release() {
         const held = this._held ?? [];
         this._held = null;
@@ -257,6 +256,7 @@ export class Daemon extends Signals.EventEmitter {
             this.emit(...args);
     }
 
+    /** Emits now, or keeps it while held. */
     emit(...args) {
         if (!this._held)
             return super.emit(...args);
@@ -266,6 +266,7 @@ export class Daemon extends Signals.EventEmitter {
         return undefined;
     }
 
+    /** Parses a property's new JSON into `state[key]`. */
     _update(key, json) {
         // isled may send a value again unchanged; nobody needs to hear it twice.
         if (key in this._raw && this._raw[key] === json)
@@ -281,6 +282,7 @@ export class Daemon extends Signals.EventEmitter {
         this.emit('changed', key);
     }
 
+    /** Passes a D-Bus signal on under its Isle name. */
     _onSignal(name, signal, args) {
         switch (signal) {
         case 'PhaseFinished':
@@ -291,6 +293,9 @@ export class Daemon extends Signals.EventEmitter {
             break;
         case 'Notice':
             this.emit('assistant-notice', args[0], args[1]);
+            break;
+        case 'ModelSwitched':
+            this.emit('model-switched', ...args);
             break;
         case 'Withdrawn':
             this.emit('agent-withdrawn', args[0]);
@@ -345,6 +350,7 @@ export class Daemon extends Signals.EventEmitter {
         });
     }
 
+    /** Cancels pending calls and drops the proxies. */
     destroy() {
         // Tell no one about changes made while tearing down.
         this.disconnectAll();

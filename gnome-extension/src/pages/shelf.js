@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 // The Shelf page: Clipboard (copy history; Super+V to search, ← → Enter to paste)
 // and Files (dropped files to drag or copy into any app).
@@ -36,12 +37,14 @@ const COLOR_WAIT_MS = 400;
 /** A dragged file's colour comes from its preview, read within this long or not at all. */
 const COLOR_LATE_MS = 1500;
 
+/** The Shelf page; `_clips` and `_files` draw its two tabs. */
 export const ShelfPage = GObject.registerClass({
     Signals: {
         // The Files tab came into or out of view; see `helperArea`.
         'helper-area-changed': {},
     },
 }, class ShelfPage extends Page {
+    /** `history` copies and pastes clipboard items; `settings` holds whether history is kept at all. */
     _init(daemon, history, settings, {height}) {
         super._init(daemon, {
             style_class: 'isle-page isle-shelf',
@@ -119,6 +122,7 @@ export const ShelfPage = GObject.registerClass({
 
     // Building
 
+    /** The tabs, then the controls of the tab shown: filters, search and Clear, or the files hint. */
     _buildBar() {
         const bar = new St.BoxLayout({style_class: 'isle-shelf-bar'});
 
@@ -209,6 +213,7 @@ export const ShelfPage = GObject.registerClass({
         this._search.grab_key_focus();
     }
 
+    /** Puts the search button back in place of the field. */
     _closeSearch() {
         this._search.hide();
         this._searchSpacer.show();
@@ -267,6 +272,7 @@ export const ShelfPage = GObject.registerClass({
         return this._tab === 'files' ? this._files : null;
     }
 
+    /** Set while the drag-and-drop helper's window covers the Files tab, which then draws nothing. */
     set helperActive(active) {
         this._files.helperActive = active;
     }
@@ -276,10 +282,12 @@ export const ShelfPage = GObject.registerClass({
         this._files.helperAvailable = available;
     }
 
+    /** The shelf light's colours, which wash the island too. */
     get tint() {
         return this._light.colors;
     }
 
+    /** A light that moves, rather than a flat wash. */
     get tintStyle() {
         return 'aura';
     }
@@ -434,6 +442,7 @@ export const ShelfPage = GObject.registerClass({
         this.later('added', ADDED_MS, () => this._setAdded(false));
     }
 
+    /** Lights the hint for a moment after a file lands. */
     _setAdded(added) {
         this._added = added;
         this._updateFilesHint();
@@ -448,6 +457,7 @@ export const ShelfPage = GObject.registerClass({
         this.markCold();
     }
 
+    /** Redraws the cards: none while history is off or the screen is shared. */
     _updateClips() {
         const off = !this._settings.get_boolean('clipboard-history');
         this._clips.update({off, hidden: Boolean(this._sharing)});
@@ -457,6 +467,7 @@ export const ShelfPage = GObject.registerClass({
 
     // Clipboard
 
+    /** Shows only one kind of item, or every kind for null; the chosen button stays lit. */
     _setFilter(kind) {
         this._filter = kind;
         for (const [filterKind, button] of this._filterButtons) {
@@ -470,6 +481,7 @@ export const ShelfPage = GObject.registerClass({
         this._clips.kind = kind;
     }
 
+    /** ← → move between cards; Esc empties the search before it can close the island. */
     _onSearchKey(event) {
         switch (event.get_key_symbol()) {
         case Clutter.KEY_Left:
@@ -489,6 +501,7 @@ export const ShelfPage = GObject.registerClass({
         }
     }
 
+    /** Copies the item back to the clipboard, and with `paste` types it into the window behind. */
     async _onActivated(item, paste) {
         // The extension may have stopped while the item was fetched.
         if (!await this._history.copy(item, {touch: paste}) || this._destroyed)
@@ -502,18 +515,21 @@ export const ShelfPage = GObject.registerClass({
         }
     }
 
+    /** Swaps the trash button for "Clear all" for a few seconds, so one click never wipes it. */
     _askToClear() {
         this._clear.hide();
         this._confirm.show();
         this.later('confirm', CONFIRM_MS, () => this._endConfirm());
     }
 
+    /** Back to the trash button. */
     _endConfirm() {
         this.cancel('confirm');
         this._confirm.hide();
         this._clear.show();
     }
 
+    /** Clears all but the pinned items. */
     _clearHistory() {
         this._endConfirm();
         this.daemon.call('clipboard', 'Clear');
@@ -533,16 +549,19 @@ export const ShelfPage = GObject.registerClass({
         return clips;
     }
 
+    /** Redraws ahead what changed while closed. */
     warmUp() {
         this._flushStale();
     }
 
+    /** Without anything stale, only the "5m ago" ages move on. */
     onActivate() {
         if (!this._flushStale())
             this._clips.refreshAges();
         this.daemon.call('shelf', 'Refresh');
     }
 
+    /** Items copied while open move to the front now, and the search empties for next time. */
     onDeactivate() {
         this._light.off();
         this._added = false;

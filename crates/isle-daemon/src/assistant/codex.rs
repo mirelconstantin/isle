@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
-//! Codex as an app server (`codex app-server`), with the user's own sign-in: one process per
-//! conversation that stays up between turns, so a reply needs no start-up; in a read-only sandbox with web
-//! search, and a home of its own so its chats never mix with the user's. Its words stream as they come.
+//! Codex as an app server with the user's sign-in: one process per conversation, kept up between turns so a
+//! reply needs no start-up. Read-only with web search, in a home of its own apart from the user's chats.
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use anyhow::{Context, bail};
 use chrono::{DateTime, Local, NaiveDate};
@@ -27,6 +27,8 @@ fn effort() -> String {
     std::env::var("ISLE_CODEX_EFFORT").unwrap_or_else(|_| EFFORT.to_owned())
 }
 const STDERR_LINES: usize = 20;
+/// `model/list` comes in pages; a plan has a handful of models, so a few pages are plenty.
+const MODEL_PAGES: usize = 5;
 /// Isle's Codex only answers, with web search: no shell, no files, no browser or desktop control, no
 /// plugins or apps. Unknown keys are ignored, so names a Codex version lacks do no harm.
 const CONFIG: &str =
@@ -68,6 +70,7 @@ sleep_tool = false
 memories = false
 ";
 
+/// One running `codex app-server` and the conversation it holds.
 pub struct Codex {
     _child: Group,
     stdin: ChildStdin,
@@ -81,6 +84,29 @@ pub struct Codex {
     /// The thread is loaded in this process (started, or resumed from `conversation`).
     ready: bool,
     pub conversation: Option<String>,
+    /// Counted for `prune` until the process above is gone (dropped after it).
+    _alive: Alive,
+}
+
+/// Isle's Codex processes in this isled, starting or running: `prune` deletes their databases only at none.
+static LIVE: Mutex<usize> = Mutex::new(0);
+
+/// One Codex counted in `LIVE`, from before it starts until it is dropped.
+struct Alive;
+
+impl Alive {
+    /// Waits for a `prune` under way, so no database goes while this Codex opens it.
+    fn new() -> Self {
+        *LIVE.lock().unwrap_or_else(PoisonError::into_inner) += 1;
+        Self
+    }
+}
+
+impl Drop for Alive {
+    /// The Codex it counted is gone.
+    fn drop(&mut self) {
+        *LIVE.lock().unwrap_or_else(PoisonError::into_inner) -= 1;
+    }
 }
 
 /// Codex's home for Isle, under Isle's data folder; it shares only the user's sign-in.
@@ -103,12 +129,9 @@ impl Codex {
         link_sign_in(&user_home(), &home());
         std::fs::write(home().join("config.toml"), CONFIG)
             .context("could not write Codex's settings")?;
-        // With no model picked, the one the user's own Codex uses.
-        let model = if model.is_empty() {
-            user_model().unwrap_or_default()
-        } else {
-            model.to_owned()
-        };
+        // "" is Codex's own default: the user's own model was weighed before (see `Session::choice`), so one
+        // it refused is never put back here.
+        let model = model.to_owned();
         let mut command = Command::new(program);
         command
             .args(["app-server", "-c", "sandbox_mode=\"read-only\""])
@@ -117,6 +140,7 @@ impl Codex {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        let alive = Alive::new();
         let mut child =
             child::spawn(&mut command).context("could not start codex; is Codex installed?")?;
         let stdin = child.stdin.take().expect("piped stdin");
@@ -145,6 +169,7 @@ impl Codex {
             next_id: 0,
             ready: false,
             conversation: resume.map(str::to_owned),
+            _alive: alive,
         };
         let version = env!("CARGO_PKG_VERSION");
         codex
@@ -158,11 +183,38 @@ impl Codex {
         Ok(codex)
     }
 
+    /// The account (`account/read`) and each page of the models its plan allows (`model/list`), from a
+    /// server of its own that is dropped after: nothing is asked of the AI.
+    pub async fn models(program: &Path) -> anyhow::Result<(Value, Vec<Value>)> {
+        let workspace = crate::store::data_dir().join("assistant");
+        let mut codex = Self::start(program, "", None, &workspace, "").await?;
+        let account = codex.request("account/read", json!({})).await;
+        let account = account.map_err(|err| codex.explained(err))?;
+        let mut pages = Vec::new();
+        let mut cursor = Value::Null;
+        for _ in 0..MODEL_PAGES {
+            let page = codex
+                .request(
+                    "model/list",
+                    json!({"cursor": cursor, "includeHidden": false}),
+                )
+                .await
+                .map_err(|err| codex.explained(err))?;
+            cursor = page["nextCursor"].clone();
+            pages.push(page);
+            if cursor.is_null() {
+                break;
+            }
+        }
+        Ok((account, pages))
+    }
+
     /// Opens the conversation now, so the first turn need not wait for it.
     pub async fn warm(&mut self) -> anyhow::Result<()> {
         self.open().await.map_err(|err| self.explained(err))
     }
 
+    /// One turn: `activity` hears its web searches, `draft` the spoken words as they stream in.
     pub async fn ask(
         &mut self,
         prompt: &str,
@@ -222,6 +274,7 @@ impl Codex {
         Ok(())
     }
 
+    /// Runs a turn and reads its events until Codex is done; anything it asks of Isle is refused.
     async fn turn(
         &mut self,
         prompt: &str,
@@ -303,6 +356,7 @@ impl Codex {
         bail!("codex stopped")
     }
 
+    /// Sends a JSON-RPC request without waiting; returns its id.
     async fn send(&mut self, method: &str, params: Value) -> anyhow::Result<u64> {
         self.next_id += 1;
         let id = self.next_id;
@@ -311,17 +365,20 @@ impl Codex {
         Ok(id)
     }
 
+    /// A JSON-RPC notification, which gets no answer.
     async fn notify(&mut self, method: &str) -> anyhow::Result<()> {
         self.write(json!({"jsonrpc": "2.0", "method": method}))
             .await
     }
 
+    /// Refuses a request from Codex, such as an approval.
     async fn reply_error(&mut self, id: &Value) -> anyhow::Result<()> {
         self.write(json!({"jsonrpc": "2.0", "id": id,
             "error": {"code": -32601, "message": "Isle's Codex only answers"}}))
             .await
     }
 
+    /// One message per line, as the app server reads them.
     async fn write(&mut self, message: Value) -> anyhow::Result<()> {
         self.stdin
             .write_all(format!("{message}\n").as_bytes())
@@ -367,6 +424,7 @@ fn parse_answer(text: &str) -> anyhow::Result<Answer> {
 /// `schema` as Codex's structured output needs it: every field required (optional ones may be null),
 /// and no others allowed.
 fn strict(schema: &str) -> anyhow::Result<String> {
+    /// Tightens one object, then its properties and items in turn.
     fn tighten(node: &mut Value) {
         let Some(object) = node.as_object_mut() else {
             return;
@@ -431,10 +489,9 @@ pub fn user_auth() -> PathBuf {
     user_home().join("auth.json")
 }
 
-/// The model in the user's own config.toml, so Isle uses the same one unless told otherwise: its
-/// top-level `model`, not a profile's. None with a provider of their own (Azure, Ollama…), whose models
-/// OpenAI's service, which Isle's Codex uses, would not know.
-fn user_model() -> Option<String> {
+/// The top-level `model` in the user's config.toml, which Isle uses too unless told otherwise. None with a
+/// provider of their own (Azure, Ollama…): OpenAI's service, which Isle's Codex uses, would not know it.
+pub(super) fn user_model() -> Option<String> {
     let config = std::fs::read_to_string(user_home().join("config.toml")).ok()?;
     if config
         .lines()
@@ -446,6 +503,7 @@ fn user_model() -> Option<String> {
     top_level_model(&config)
 }
 
+/// `model = "…"` before the first table; a profile's model doesn't count.
 fn top_level_model(config: &str) -> Option<String> {
     config
         .lines()
@@ -491,6 +549,8 @@ fn delete_thread(id: &str) -> anyhow::Result<()> {
     if let Some(path) = super::child::path_for(&program) {
         command.env("PATH", path);
     }
+    // Counted like any Codex of Isle's, so `prune` never deletes its databases as it opens them.
+    let _alive = Alive::new();
     let mut child = command
         .arg("app-server")
         .env("CODEX_HOME", home())
@@ -534,6 +594,7 @@ fn delete_thread(id: &str) -> anyhow::Result<()> {
 
 /// Deletes the files of conversation `id` left in Isle's Codex home.
 fn forget_files(id: &str) {
+    /// Removes every file under `dir` whose path names `id`.
     fn walk(dir: &Path, id: &str) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
@@ -568,7 +629,9 @@ fn running() -> bool {
 /// Deletes Isle's Codex conversations last changed before `today`; with no Isle Codex running, its
 /// databases go too (they hold only Isle's conversations, and Codex makes them again).
 pub fn prune(today: NaiveDate) {
-    if !running() {
+    // Held while deleting: a Codex this isled starts meanwhile waits (see `Alive`).
+    let live = LIVE.lock().unwrap_or_else(PoisonError::into_inner);
+    if *live == 0 && !running() {
         for entry in std::fs::read_dir(home()).into_iter().flatten().flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
             if name.contains(".sqlite") {
@@ -579,6 +642,8 @@ pub fn prune(today: NaiveDate) {
             std::fs::remove_dir_all(home().join(dir)).ok();
         }
     }
+    drop(live);
+    /// Removes files last changed before `today`, then the folders left empty.
     fn walk(dir: &Path, today: NaiveDate) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;

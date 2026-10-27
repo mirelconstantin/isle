@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 // A call in any app (WhatsApp, Telegram, Meet in a browser…): an app holding the microphone,
 // the window it runs in, and the microphone's mute. Event driven, like privacy.js.
@@ -26,6 +27,10 @@ const RECORDERS = ['obs', 'audacity', 'tenacity', 'recorder', 'kooha', 'kdenlive
 /** The icon Gvc gives a stream that names none. */
 const DEFAULT_STREAM_ICON = 'audio-input-microphone';
 
+/** A window's title settles this soon (ms) after it appears or changes, before the call's window is looked at again. */
+const RECHECK_MS = 500;
+/** A tab moving: its old window stops showing the call and another starts within this long (µs) of it. */
+const MOVE_WITHIN_US = 2 * 1000000;
 /** Call services named in window titles, for calls in a browser. */
 const SERVICES = [
     [/google meet|\bmeet\b/i, 'Google Meet'],
@@ -70,6 +75,7 @@ function appMatches(app, keys) {
 
 /** Signals: `changed` (the call, its window or the mute), `started`. */
 export class CallMonitor extends Signals.EventEmitter {
+    /** Follows the mixer's streams, the default microphone and the call-activity setting. */
     constructor(privacy, settings) {
         super();
         this._privacy = privacy;
@@ -87,16 +93,25 @@ export class CallMonitor extends Signals.EventEmitter {
         this._service = null;
         this._streamName = null;
         this._heldSince = 0;
-        this._timeouts = {start: 0, end: 0};
+        this._timeouts = {start: 0, end: 0, recheck: 0, standIn: 0};
+        /** The call's window is a guess made as its own closed, until its tab shows where it went. */
+        this._standIn = false;
         this._source = null;
         this._sourceIds = [];
         this._windowIds = [];
+        /** Each window watched during the call: {ids, gained, gainedAt}, the service its title came to name, and when. */
+        this._watched = new Map();
+        /** When (µs) the call's window last stopped showing the call: closed, or another tab in front. */
+        this._lostAt = 0;
+        this._windowNamed = false;
 
         this._mixerIds = [
             ...['stream-added', 'stream-removed'].map(signal => this._mixer.connect(signal, () => this._sync())),
             ...['default-source-changed', 'state-changed'].map(signal => this._mixer.connect(signal, () => this._watchSource())),
         ];
         this._settingsId = settings.connect('changed::call-activity', () => this._sync());
+        // A tab torn off into a window of its own (the call's, say) comes as a new window, its title a moment later.
+        this._windowCreatedId = global.display.connect('window-created', (_display, window) => this._watchWindow(window, true));
         // The camera makes it a video call; screen sharing hides the preview.
         this._privacyId = privacy.connect('changed', () => this._changed());
         this._watchSource();
@@ -113,6 +128,7 @@ export class CallMonitor extends Signals.EventEmitter {
         return this._source?.is_muted ?? false;
     }
 
+    /** Mutes or unmutes the microphone from the call's button. */
     toggleMuted() {
         this._source?.change_is_muted(!this.muted);
     }
@@ -131,6 +147,7 @@ export class CallMonitor extends Signals.EventEmitter {
         return this._service ?? this.app?.get_name() ?? this._streamName ?? 'Call';
     }
 
+    /** The call app's icon, or null when the app is unknown. */
     get gicon() {
         return this.app?.get_icon() ?? null;
     }
@@ -143,6 +160,7 @@ export class CallMonitor extends Signals.EventEmitter {
             this.app?.activate();
     }
 
+    /** Only a running call has anything to redraw. */
     _changed() {
         if (this.active)
             this.emit('changed');
@@ -160,6 +178,7 @@ export class CallMonitor extends Signals.EventEmitter {
         }) ?? null;
     }
 
+    /** Starts a call once the microphone is held long enough, and ends it a while after it is let go. */
     _sync() {
         const stream = this._callStream();
         this._stream = stream;
@@ -181,20 +200,28 @@ export class CallMonitor extends Signals.EventEmitter {
             this._later('end', this._settings.get_boolean('call-activity') ? END_DELAY_MS : 0, () => this._end());
     }
 
+    /** The microphone is still held after the delay: the call is on. */
     _begin() {
         const stream = this._callStream();
         if (!stream)
             return;
         this.active = true;
         this.since = this._heldSince;
+        global.display.list_all_windows().forEach(window => this._watchWindow(window));
         this._identify(stream);
         this.emit('started');
         this.emit('changed');
     }
 
+    /** Clears the call and its window. */
     _end() {
+        this._cancel('recheck');
+        this._cancel('standIn');
+        this._standIn = false;
+        this._unwatchWindows();
         this.active = false;
         this.since = 0;
+        this._lostAt = 0;
         this.app = null;
         this._streamName = null;
         this._setWindow(null);
@@ -233,17 +260,38 @@ export class CallMonitor extends Signals.EventEmitter {
             : [];
         const candidates = [...new Set([...appWindows, ...browserWindows])];
         const current = candidates.includes(this.window) ? this.window : null;
-        if (current && this._service)
-            return current;
-        const named = candidates.find(window => serviceOf(window.get_title()));
+        // Kept while it still shows the call; else a window whose title came to show it as the call left this one
+        // (its tab moved there). Never one that names the service at another time (Meet's home page, "Quick meet").
+        const arrived = window => {
+            const watched = this._watched.get(window);
+            return window !== current && this._lostAt > 0 && watched?.gained === this._service &&
+                Math.abs(watched.gainedAt - this._lostAt) <= MOVE_WITHIN_US &&
+                serviceOf(window.get_title()) === this._service;
+        };
+        if (current && this._service) {
+            // A stand-in picked as the call's window closed gives way to the window its tab really went to.
+            const left = serviceOf(current.get_title()) !== this._service || this._standIn;
+            const moved = left && candidates.find(arrived);
+            if (moved)
+                this._standIn = false;
+            return moved || current;
+        }
+        // A known call keeps its service: the window its tab just went to, else one showing it (not WhatsApp's
+        // for a Meet call), a stand-in until the tab's own window shows up.
+        const went = this._service && candidates.find(arrived);
+        if (went)
+            return went;
+        const named = candidates.find(window => this._service ? serviceOf(window.get_title()) === this._service
+            : serviceOf(window.get_title()));
         if (named) {
-            this._service = serviceOf(named.get_title());
+            this._service ??= serviceOf(named.get_title());
             return named;
         }
         // Without a known app only a browser's call tab will do (not an editor showing "signal.rs").
         return current ?? appWindows.find(window => window.has_focus()) ?? appWindows[0] ?? null;
     }
 
+    /** Follows the call's window: closed, retitled or minimized. */
     _setWindow(window) {
         if (window === this.window)
             return;
@@ -252,22 +300,86 @@ export class CallMonitor extends Signals.EventEmitter {
         this.window = window;
         if (!window)
             return;
+        this._windowNamed = Boolean(this._service) && serviceOf(window.get_title()) === this._service;
         this._windowIds = [
+            // Closed: another window showing the call (the service is kept, so later moves are still followed).
             window.connect('unmanaged', () => {
-                this._service = null;
-                this._setWindow(this._chooseWindow(this.app, window));
+                this._lostAt = GLib.get_monotonic_time();
+                const next = this._chooseWindow(this.app, window);
+                // Not one its tab just went to: a stand-in, for as long as a move can still come.
+                const watched = next && this._watched.get(next);
+                this._standIn = Boolean(next && this._service) && !(watched?.gained === this._service &&
+                    Math.abs(watched.gainedAt - this._lostAt) <= MOVE_WITHIN_US);
+                if (this._standIn)
+                    this._later('standIn', MOVE_WITHIN_US / 1000, () => (this._standIn = false));
+                this._setWindow(next);
                 this._changed();
             }),
             // The call's tab came to the front: now the window is known for sure.
             window.connect('notify::title', () => {
                 if (GLib.get_monotonic_time() - this.since < SERVICE_GRACE_US)
                     this._service ??= serviceOf(window.get_title());
+                // Its tab leaving: the moment a window gaining it must come close to (see `_chooseWindow`).
+                const named = Boolean(this._service) && serviceOf(window.get_title()) === this._service;
+                if (this._windowNamed && !named)
+                    this._lostAt = GLib.get_monotonic_time();
+                this._windowNamed = named;
+                this._recheckWindow();
                 this._changed();
             }),
             window.connect('notify::minimized', () => this._changed()),
         ];
     }
 
+    /** Follows a window's title during the call, noting the service it comes to name (a call's tab arriving).
+     * One `created` during the call came with the tab when its title already names it (X11 sets it first). */
+    _watchWindow(window, created = false) {
+        if (!this.active || this._watched.has(window) || window.get_window_type() !== Meta.WindowType.NORMAL)
+            return;
+        const entry = {gained: created ? serviceOf(window.get_title()) : null, gainedAt: GLib.get_monotonic_time()};
+        entry.ids = [
+            window.connect('notify::title', () => {
+                // Any new title naming a service (another Meet page too): the call's tab may have come.
+                const now = serviceOf(window.get_title());
+                entry.gained = now;
+                entry.gainedAt = GLib.get_monotonic_time();
+                // Only a title naming the call's service can move it; others' titles (a terminal's spinner) can't.
+                if (now && now === this._service)
+                    this._recheckWindow();
+            }),
+            window.connect('unmanaged', () => {
+                entry.ids.forEach(id => window.disconnect(id));
+                this._watched.delete(window);
+            }),
+        ];
+        this._watched.set(window, entry);
+        if (entry.gained)
+            this._recheckWindow();
+    }
+
+    /** Stops following the windows' titles. */
+    _unwatchWindows() {
+        for (const [window, {ids}] of this._watched)
+            ids.forEach(id => window.disconnect(id));
+        this._watched.clear();
+    }
+
+    /** Shortly after a title change, the window that shows a known call, if another now. */
+    _recheckWindow() {
+        if (!this.active || !this._service || this._timeouts.recheck)
+            return;
+        this._later('recheck', RECHECK_MS, () => {
+            if (!this.active)
+                return;
+            const window = this._chooseWindow(this.app);
+            if (window && window !== this.window) {
+                this._setWindow(window);
+                this._changed();
+            }
+        });
+    }
+
+    /** Moves the mute listener to the current default microphone. */
     _watchSource() {
         this._sourceIds.forEach(id => this._source.disconnect(id));
         this._sourceIds = [];
@@ -277,6 +389,7 @@ export class CallMonitor extends Signals.EventEmitter {
         this._changed();
     }
 
+    /** Runs `callback` once after `ms`, under `name` so it can be cancelled. */
     _later(name, ms, callback) {
         this._timeouts[name] = GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => {
             this._timeouts[name] = 0;
@@ -285,6 +398,7 @@ export class CallMonitor extends Signals.EventEmitter {
         });
     }
 
+    /** Cancels the pending `start`, `end`, `recheck` or `standIn`, if any. */
     _cancel(name) {
         if (this._timeouts[name]) {
             GLib.source_remove(this._timeouts[name]);
@@ -292,11 +406,16 @@ export class CallMonitor extends Signals.EventEmitter {
         }
     }
 
+    /** Stops both timers and every listener. */
     destroy() {
         // Tell no one about changes made while tearing down.
         this.disconnectAll();
         this._cancel('start');
         this._cancel('end');
+        this._cancel('recheck');
+        this._cancel('standIn');
+        this._unwatchWindows();
+        global.display.disconnect(this._windowCreatedId);
         this._setWindow(null);
         this._sourceIds.forEach(id => this._source.disconnect(id));
         this._mixerIds.forEach(id => this._mixer.disconnect(id));

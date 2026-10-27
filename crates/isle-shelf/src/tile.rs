@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 //! A file's tile, one size for all, as in pages/files.js: drag it out, click to copy,
 //! double-click to open, × to remove.
@@ -43,6 +44,7 @@ const PICTURE_TYPES: &[&str] = &[
     "image/tiff",
 ];
 
+/// Builds the tile for `item`; `fresh` makes it pop in, `on_remove` gets its URI on ×.
 pub fn new(item: &Item, fresh: bool, on_remove: impl Fn(String) + 'static) -> gtk::Widget {
     let file = gio::File::for_uri(&item.uri);
     // Known once the file's details arrive; until then it copies as a file.
@@ -138,6 +140,7 @@ pub fn new(item: &Item, fresh: bool, on_remove: impl Fn(String) + 'static) -> gt
     tile.upcast()
 }
 
+/// The rounded square the icon or thumbnail sits in.
 fn preview_square(classes: &[&str]) -> gtk::Box {
     gtk::Box::builder()
         .width_request(PREVIEW_SIZE)
@@ -174,10 +177,10 @@ fn frame(preview: &impl IsA<gtk::Widget>, remove: Option<&gtk::Button>) -> gtk::
     frame
 }
 
+/// The frame above its name, in a fixed-width column.
 fn tile_box(frame: &gtk::Overlay, name: &str, fresh: bool) -> gtk::Box {
-    // Exactly NAME_WIDTH wide, as in the island: the requested width, with
-    // the natural one kept below it so a long name never widens the tile.
-    // Two lines, as in the island: only a longer name loses its middle.
+    // NAME_WIDTH wide and two lines, as in the island: a tiny natural width keeps a long name from
+    // widening the tile, and only a longer name loses its middle.
     let label = gtk::Label::builder()
         .label(name)
         .wrap(true)
@@ -355,6 +358,7 @@ fn file_content(file: &gio::File) -> gdk::ContentProvider {
     ])
 }
 
+/// Opens the file in its default app.
 fn open(file: &gio::File, parent: Option<gtk::Window>) {
     let launcher = gtk::FileLauncher::new(Some(file));
     launcher.launch(parent.as_ref(), None::<&gio::Cancellable>, |result| {

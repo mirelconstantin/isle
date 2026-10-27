@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
-//! The assistant's "brain": whichever AI CLI the user has and picked (agy, Claude Code or Codex), behind one
+//! The assistant's "brain": whichever AI CLI the user has and picked (agy, Claude Code, Codex or Grok), behind one
 //! face. Each runs with the user's own sign-in, kept to answering; isled runs the tools and actions itself.
 
 use std::path::{Path, PathBuf};
@@ -11,24 +12,34 @@ use super::agy::{self, Agy};
 use super::answer::Answer;
 use super::claude::Claude;
 use super::codex::Codex;
+use super::grok::Grok;
 
+/// An AI CLI the assistant can run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Provider {
     Agy,
     Claude,
     Codex,
+    Grok,
 }
 
 /// Tried in this order when the user picked "auto", signed-in ones first. agy comes last: its terms bar
 /// third-party tools, so it answers only when it is all there is, or picked.
-const AUTO: [Provider; 3] = [Provider::Claude, Provider::Codex, Provider::Agy];
+const AUTO: [Provider; 4] = [
+    Provider::Claude,
+    Provider::Codex,
+    Provider::Grok,
+    Provider::Agy,
+];
 
 impl Provider {
+    /// Its id in Settings and in saved state.
     pub fn id(self) -> &'static str {
         match self {
             Provider::Agy => "agy",
             Provider::Claude => "claude",
             Provider::Codex => "codex",
+            Provider::Grok => "grok",
         }
     }
 
@@ -38,14 +49,17 @@ impl Provider {
             Provider::Agy => "Antigravity",
             Provider::Claude => "Claude Code",
             Provider::Codex => "Codex",
+            Provider::Grok => "Grok",
         }
     }
 
+    /// The program's file name.
     fn command(self) -> &'static str {
         match self {
             Provider::Agy => "agy",
             Provider::Claude => "claude",
             Provider::Codex => "codex",
+            Provider::Grok => "grok",
         }
     }
 
@@ -72,6 +86,7 @@ impl Provider {
                 super::codex::user_auth().exists()
                     || std::env::var_os("OPENAI_API_KEY").is_some_and(|key| !key.is_empty())
             }
+            Provider::Grok => super::grok::signed_in(),
         }
     }
 
@@ -81,10 +96,11 @@ impl Provider {
             Provider::Agy => "agy",
             Provider::Claude => "claude",
             Provider::Codex => "codex login",
+            Provider::Grok => "grok login",
         }
     }
 
-    /// The provider with id `id` ("agy", "claude", "codex").
+    /// The provider with id `id` ("agy", "claude", "codex", "grok").
     pub fn from_id(id: &str) -> Option<Provider> {
         AUTO.into_iter().find(|p| p.id() == id)
     }
@@ -95,11 +111,12 @@ impl Provider {
         self != Provider::Agy
     }
 
-    pub fn all() -> [Provider; 3] {
+    /// Every provider, in "auto" order.
+    pub fn all() -> [Provider; 4] {
         AUTO
     }
 
-    /// `wanted` ("agy", "claude", "codex" or "auto"), if installed; for "auto", the first installed and
+    /// `wanted` ("agy", "claude", "codex", "grok" or "auto"), if installed; for "auto", the first installed and
     /// signed in, else the first installed (which then asks to sign in).
     pub fn pick(wanted: &str) -> Option<Provider> {
         let installed = |p: &Provider| p.program().is_some();
@@ -160,6 +177,7 @@ fn dirs_in(home: &Path, env_dir: impl Fn(&str) -> Option<PathBuf>) -> Vec<PathBu
         home.join(".fnm/aliases/default/bin"),
         // Claude Code's own older install, mise and asdf, yarn, Homebrew on Linux, Nix.
         home.join(".claude/local"),
+        home.join(".grok/bin"),
         home.join(".local/share/mise/shims"),
         home.join(".asdf/shims"),
         home.join(".yarn/bin"),
@@ -196,10 +214,12 @@ fn npm_prefix(home: &Path, from_env: Option<PathBuf>) -> Option<PathBuf> {
     set.is_absolute().then(|| set.join("bin"))
 }
 
+/// The running CLI behind the assistant, whichever it is.
 pub enum Brain {
     Agy(Agy),
     Claude(Claude),
     Codex(Codex),
+    Grok(Grok),
 }
 
 impl Brain {
@@ -227,6 +247,9 @@ impl Brain {
             Provider::Codex => {
                 Brain::Codex(Codex::start(&program, model, resume, workspace, instructions).await?)
             }
+            Provider::Grok => {
+                Brain::Grok(Grok::start(&program, model, resume, workspace, instructions).await?)
+            }
         })
     }
 
@@ -234,15 +257,17 @@ impl Brain {
     pub async fn warm(&mut self) -> anyhow::Result<()> {
         match self {
             Brain::Codex(codex) => codex.warm().await,
-            Brain::Agy(_) | Brain::Claude(_) => Ok(()),
+            Brain::Agy(_) | Brain::Claude(_) | Brain::Grok(_) => Ok(()),
         }
     }
 
+    /// Which CLI this is.
     pub fn provider(&self) -> Provider {
         match self {
             Brain::Agy(_) => Provider::Agy,
             Brain::Claude(_) => Provider::Claude,
             Brain::Codex(_) => Provider::Codex,
+            Brain::Grok(_) => Provider::Grok,
         }
     }
 
@@ -258,6 +283,7 @@ impl Brain {
             Brain::Agy(agy) => agy.ask(prompt, activity).await,
             Brain::Claude(claude) => claude.ask(prompt, activity, draft).await,
             Brain::Codex(codex) => codex.ask(prompt, activity, draft).await,
+            Brain::Grok(grok) => grok.ask(prompt, activity, draft).await,
         }
     }
 
@@ -267,6 +293,7 @@ impl Brain {
             Brain::Agy(agy) => agy.conversation.clone(),
             Brain::Claude(claude) => claude.conversation.clone(),
             Brain::Codex(codex) => codex.conversation.clone(),
+            Brain::Grok(grok) => grok.conversation.clone(),
         }
     }
 
@@ -276,6 +303,7 @@ impl Brain {
             Provider::Agy => agy::forget(id),
             Provider::Claude => super::claude::forget(id),
             Provider::Codex => super::codex::forget(id),
+            Provider::Grok => super::grok::forget(id),
         }
     }
 
@@ -284,6 +312,7 @@ impl Brain {
         agy::prune(today);
         super::claude::prune(today);
         super::codex::prune(today);
+        super::grok::prune(today);
     }
 }
 
@@ -299,6 +328,7 @@ pub struct Failure {
 }
 
 impl From<(&str, &str)> for Failure {
+    /// Just words: nothing to sign in to or set up.
     fn from((error, hint): (&str, &str)) -> Self {
         Self {
             error: error.into(),

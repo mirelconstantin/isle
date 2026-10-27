@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 // The few places GNOME Shell 46 to 51 differ for Isle, so the rest of the
 // code reads the same on all of them.
@@ -38,6 +39,21 @@ export function maximize(window) {
 /** Unmaximizes `window`; see `maximize`. */
 export function unmaximize(window) {
     return SHELL_MAJOR >= 49 ? window.unmaximize() : window.unmaximize(Meta.MaximizeFlags.BOTH);
+}
+
+/** Stops a window that covers a whole display going straight to the screen (scanout or X11 unredirection)
+ * past what is drawn over it; `false` allows it again. Counted, so keep calls paired; GNOME 48 moved it. */
+export function inhibitScanout(inhibit) {
+    if (SHELL_MAJOR >= 48) {
+        if (inhibit)
+            global.compositor.disable_unredirect();
+        else
+            global.compositor.enable_unredirect();
+    } else if (inhibit) {
+        Meta.disable_unredirect_for_display(global.display);
+    } else {
+        Meta.enable_unredirect_for_display(global.display);
+    }
 }
 
 /** The actor `event` is for: the stage says where it can, as `Clutter.Event.get_source` is going from Clutter. */

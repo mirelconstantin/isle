@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 // Text formatting shared by the island's views.
 
@@ -87,15 +88,32 @@ export function phaseName(phase) {
     }[phase] ?? phase;
 }
 
-/** Wall-clock milliseconds, in the same terms as the daemon's timestamps. */
-/** An answer's light Markdown (**bold**, `code`, "- " lists) as plain words on one line, for a single label. */
+/** An answer's light Markdown (**bold**, `code`, "- " lists) as plain words on one line, for a single label.
+ * A whole answer written as the schema's JSON (`{"say":"…"}`) shows as those words. */
 export function answerPlain(text) {
+    text = spoken(text);
     return text.split('\n')
         .map(line => line.replace(/^\s*[-*•]\s+/, '• ').replace(/\*\*(.+?)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').trim())
         .filter(Boolean)
         .join(' ');
 }
 
+/** The words of an answer that arrived as `{"say":"…"}`, also inside a ```json fence; else `text`. */
+export function spoken(text) {
+    const trimmed = text.trim();
+    const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/.exec(trimmed);
+    const body = fenced ? fenced[1] : trimmed;
+    if (!body.startsWith('{'))
+        return text;
+    try {
+        const say = JSON.parse(body).say;
+        return typeof say === 'string' && say.trim() ? say.trim() : text;
+    } catch {
+        return text;
+    }
+}
+
+/** Wall-clock milliseconds, in the same terms as the daemon's timestamps. */
 export function nowMs() {
     return Math.floor(GLib.get_real_time() / 1000);
 }

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 //! The D-Bus interface the GNOME extension uses to place the window.
 
@@ -151,6 +152,7 @@ pub fn announce_hovering(uris: &[String]) {
     announce("Hovering", &(uris,).to_variant());
 }
 
+/// Emits one of the interface's signals; a failure is only logged.
 fn announce(signal: &str, args: &glib::Variant) {
     let result = gio::bus_get_sync(gio::BusType::Session, None::<&gio::Cancellable>)
         .and_then(|bus| bus.emit_signal(None, OBJECT_PATH, INTERFACE_NAME, signal, Some(args)));

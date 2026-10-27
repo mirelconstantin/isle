@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
 //! Watches every MPRIS player on the session bus and publishes the active one.
 
@@ -42,32 +43,43 @@ const ART_RETRY: Duration = Duration::from_secs(5 * 60);
 const LYRICS_RETRY: Duration = Duration::from_secs(30);
 const LYRICS_RETRY_MAX: Duration = Duration::from_secs(10 * 60);
 
+/// The MPRIS player controls Isle uses.
 #[proxy(
     interface = "org.mpris.MediaPlayer2.Player",
     default_path = "/org/mpris/MediaPlayer2",
     gen_blocking = false
 )]
 pub trait Player {
+    /// Toggles playback.
     fn play_pause(&self) -> zbus::Result<()>;
+    /// Skips to the next track.
     fn next(&self) -> zbus::Result<()>;
+    /// Back to the previous track.
     fn previous(&self) -> zbus::Result<()>;
+    /// Moves by `offset` microseconds from where it is.
     fn seek(&self, offset: i64) -> zbus::Result<()>;
+    /// Jumps to `position` microseconds, if `track_id` is still the track playing.
     fn set_position(&self, track_id: &ObjectPath<'_>, position: i64) -> zbus::Result<()>;
+    /// Where playback is now, in microseconds.
     #[zbus(property)]
     fn position(&self) -> zbus::Result<i64>;
+    /// Sent when the position jumps rather than moving on with time.
     #[zbus(signal)]
     fn seeked(&self, position: i64) -> zbus::Result<()>;
 }
 
+/// The player's app, to bring its window forward.
 #[proxy(
     interface = "org.mpris.MediaPlayer2",
     default_path = "/org/mpris/MediaPlayer2",
     gen_blocking = false
 )]
 pub trait App {
+    /// Shows the player's window.
     fn raise(&self) -> zbus::Result<()>;
 }
 
+/// What the watch loop is woken for, besides bus names and wishes from the extension.
 enum Event {
     /// A player's properties changed or it seeked.
     Player(OwnedBusName),
@@ -100,6 +112,7 @@ struct Snapshot {
     can_seek: bool,
 }
 
+/// One player being watched.
 struct Entry {
     player: PlayerProxy<'static>,
     properties: PropertiesProxy<'static>,
@@ -112,11 +125,13 @@ struct Entry {
 }
 
 impl Drop for Entry {
+    /// Stops listening to a player that left the bus.
     fn drop(&mut self) {
         self.listener.abort();
     }
 }
 
+/// All the watching state, owned by the loop in [`watch`].
 struct Watcher {
     conn: Connection,
     iface: InterfaceRef<MediaService>,
@@ -240,6 +255,7 @@ fn pick<'a, N: PartialEq + 'a>(
         .map(|(name, _, _)| name)
 }
 
+/// An MPRIS name, but not playerctld's copies of other players.
 fn is_player(name: &str) -> bool {
     name.starts_with(NAME_PREFIX) && !IGNORED.contains(&name)
 }
@@ -257,6 +273,7 @@ pub(super) async fn bounded<T, E: From<zbus::Error>>(
 }
 
 impl Watcher {
+    /// Starts watching a player that appeared, and reads it once.
     async fn add(&mut self, name: OwnedBusName) {
         match self.connect(name.clone()).await {
             Ok(entry) => {
@@ -268,6 +285,7 @@ impl Watcher {
         }
     }
 
+    /// Reads the player's name and app, and listens for its changes in bursts.
     async fn connect(&self, name: OwnedBusName) -> zbus::Result<Entry> {
         let player = PlayerProxy::builder(&self.conn)
             .destination(name.clone())?
@@ -335,6 +353,7 @@ impl Watcher {
         })
     }
 
+    /// Reads a player again; one that just started playing takes over from a hand-picked one.
     async fn refresh(&mut self, name: &OwnedBusName) {
         let Some(entry) = self.players.get_mut(name) else {
             return;
@@ -368,6 +387,7 @@ impl Watcher {
         self.active_name().and_then(|name| self.players.get(name))
     }
 
+    /// The bus name of the player to show (see `pick`).
     fn active_name(&self) -> Option<&OwnedBusName> {
         let players = self.players.iter().map(|(name, entry)| {
             (
@@ -379,6 +399,7 @@ impl Watcher {
         pick(players, self.chosen.as_ref())
     }
 
+    /// What the user asked for in the island: a player picked, or lyrics turned on or off.
     fn wish(&mut self, wish: Wish) {
         match wish {
             Wish::Player(name) => {
@@ -417,6 +438,7 @@ impl Watcher {
         choices
     }
 
+    /// Sends the active player, the player list and lyrics to the extension, when they changed.
     async fn publish(&mut self) {
         let art_url = self.active().map(|entry| entry.snapshot.art_url.clone());
         let art_path = art_url.map(|url| self.art_path(url)).unwrap_or_default();
@@ -510,6 +532,7 @@ impl Watcher {
         });
     }
 
+    /// Downloads remote cover art in the background, once at a time and not again soon after a failure.
     fn download_art(&mut self, url: String) {
         if self.downloading_art.as_ref() == Some(&url)
             || self
@@ -531,6 +554,7 @@ impl Watcher {
         });
     }
 
+    /// Notes how a download went, so a dead link waits [`ART_RETRY`].
     fn art_done(&mut self, url: String, ok: bool) {
         if self.downloading_art.as_ref() == Some(&url) {
             self.downloading_art = None;
@@ -569,6 +593,7 @@ impl Watcher {
         }
     }
 
+    /// Looks lyrics up off the async threads, under a new lookup number.
     fn fetch_lyrics(&mut self, query: TrackQuery) {
         self.lyrics_lookup += 1;
         let lookup = self.lyrics_lookup;
@@ -610,6 +635,7 @@ impl Watcher {
         }
     }
 
+    /// Publishes lyrics that still belong to the current track.
     async fn set_lyrics(&self, lyrics: Lyrics) {
         // Drop results for a track that is no longer playing.
         if lyrics.status != LyricsStatus::None
@@ -627,6 +653,7 @@ impl Watcher {
     }
 }
 
+/// Reads what Isle shows from a player's `GetAll` reply, with safe defaults for what is missing.
 fn snapshot(all: &HashMap<String, OwnedValue>) -> Snapshot {
     let get = |key: &str| all.get(key).map(|value| &**value);
     let flag = |key: &str| get(key).and_then(boolean).unwrap_or(false);
@@ -667,6 +694,7 @@ fn snapshot(all: &HashMap<String, OwnedValue>) -> Snapshot {
     }
 }
 
+/// The value inside any number of nested variants.
 fn unwrap_variant<'a>(value: &'a Value<'a>) -> &'a Value<'a> {
     match value {
         Value::Value(inner) => unwrap_variant(inner),
@@ -674,6 +702,7 @@ fn unwrap_variant<'a>(value: &'a Value<'a>) -> &'a Value<'a> {
     }
 }
 
+/// A string or object path, as players send either.
 fn string(value: &Value<'_>) -> Option<String> {
     match unwrap_variant(value) {
         Value::Str(s) => Some(s.to_string()),
@@ -682,6 +711,7 @@ fn string(value: &Value<'_>) -> Option<String> {
     }
 }
 
+/// A list of strings; a lone string counts as a list of one.
 fn strings(value: &Value<'_>) -> Vec<String> {
     match unwrap_variant(value) {
         Value::Array(array) => array.iter().filter_map(string).collect(),
@@ -689,6 +719,7 @@ fn strings(value: &Value<'_>) -> Vec<String> {
     }
 }
 
+/// Any integer type a player might use, or a float cut down.
 fn integer(value: &Value<'_>) -> Option<i64> {
     match unwrap_variant(value) {
         Value::I64(n) => Some(*n),
@@ -700,6 +731,7 @@ fn integer(value: &Value<'_>) -> Option<i64> {
     }
 }
 
+/// A float, or an integer some players send for the rate.
 fn float(value: &Value<'_>) -> Option<f64> {
     match unwrap_variant(value) {
         Value::F64(n) => Some(*n),
@@ -707,6 +739,7 @@ fn float(value: &Value<'_>) -> Option<f64> {
     }
 }
 
+/// A plain boolean.
 fn boolean(value: &Value<'_>) -> Option<bool> {
     match unwrap_variant(value) {
         Value::Bool(b) => Some(*b),

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 zickrian
 
-//! Asks the real AI many requests as isled would, and checks each answer: `cargo test -p isle-daemon --release
-//! eval -- --ignored --nocapture`. ISLE_EVAL_PROVIDER/_MODEL pick the AI; ISLE_EVAL_QUICK=1 runs a dozen cases,
-//! ISLE_EVAL_ONLY=text those whose request contains it.
+//! Asks the real AI many requests as isled would, checking each answer: `cargo test -p isle-daemon --release eval
+//! -- --ignored --nocapture`. ISLE_EVAL_PROVIDER/_MODEL pick the AI; _QUICK=1 runs a dozen, _ONLY=text matching ones.
 
 use std::sync::Arc;
 
@@ -23,6 +23,7 @@ struct Agenda {
 }
 
 impl Agenda {
+    /// One open to-do and a meeting today, so the cases have something to refer to.
     fn new() -> Self {
         let today = chrono::Local::now().format("%a %Y-%m-%d");
         Self {
@@ -33,6 +34,7 @@ impl Agenda {
         }
     }
 
+    /// Adds and removes what the answer's actions did.
     fn apply(&mut self, answer: &Answer) {
         for action in &answer.actions {
             let id = action["id"].as_u64();
@@ -59,6 +61,7 @@ impl Agenda {
         }
     }
 
+    /// The agenda as isled puts it in a prompt, with each item's id.
     fn summary(&self) -> String {
         let list = |heading: &str, items: &[(u64, String)]| {
             if items.is_empty() {
@@ -77,6 +80,7 @@ impl Agenda {
     }
 }
 
+/// A string field as it is, "" when missing.
 fn text_of(value: &Value, key: &str) -> String {
     value[key].as_str().unwrap_or_default().to_owned()
 }
@@ -92,11 +96,12 @@ const APPS: &[&str] = &[
     "Text Editor",
     "Visual Studio Code",
 ];
-/// The AI the eval asks: agy unless ISLE_EVAL_PROVIDER says claude or codex.
+/// The AI the eval asks: agy unless ISLE_EVAL_PROVIDER says claude, codex or grok.
 fn eval_provider() -> Provider {
     match std::env::var("ISLE_EVAL_PROVIDER").as_deref() {
         Ok("claude") => Provider::Claude,
         Ok("codex") => Provider::Codex,
+        Ok("grok") => Provider::Grok,
         _ => Provider::Agy,
     }
 }
@@ -147,6 +152,7 @@ const PARALLEL: usize = 5;
 
 type Check = fn(&[Answer]) -> Result<(), String>;
 
+/// A conversation of one or more turns, and the check its answers must pass.
 struct Case {
     turns: &'static [&'static str],
     selection: &'static str,
@@ -154,6 +160,7 @@ struct Case {
     check: Check,
 }
 
+/// A case with no selection and no notifications.
 fn case(turns: &'static [&'static str], check: Check) -> Case {
     Case {
         turns,
@@ -163,10 +170,12 @@ fn case(turns: &'static [&'static str], check: Check) -> Case {
     }
 }
 
+/// The answer to the final turn.
 fn last(answers: &[Answer]) -> &Answer {
     answers.last().expect("one answer per turn")
 }
 
+/// Every action of `kind`.
 fn actions<'a>(answer: &'a Answer, kind: &str) -> Vec<&'a Value> {
     answer
         .actions
@@ -183,14 +192,17 @@ fn action<'a>(answer: &'a Answer, kind: &str) -> Result<&'a Value, String> {
         .ok_or_else(|| format!("no {kind} action"))
 }
 
+/// A string field in lower case, for loose matching.
 fn text(value: &Value, key: &str) -> String {
     value[key].as_str().unwrap_or_default().to_lowercase()
 }
 
+/// Fails with `why` unless `ok`.
 fn ensure(ok: bool, why: &str) -> Result<(), String> {
     if ok { Ok(()) } else { Err(why.to_owned()) }
 }
 
+/// Lower-case words, split at anything not a letter or digit.
 fn words(say: &str) -> Vec<String> {
     say.to_lowercase()
         .split(|c: char| !c.is_alphanumeric())
@@ -204,16 +216,19 @@ const INDONESIAN: &[&str] = &[
     "lagi", "sekarang", "dulu", "tekan", "adalah", "dari", "akan", "sedang",
 ];
 
+/// Whether the reply has any of those words.
 fn speaks_indonesian(answer: &Answer) -> bool {
     words(&answer.say)
         .iter()
         .any(|w| INDONESIAN.contains(&w.as_str()))
 }
 
+/// The reply is in Indonesian, as the request was.
 fn indonesian(answer: &Answer) -> Result<(), String> {
     ensure(speaks_indonesian(answer), "reply is not in Indonesian")
 }
 
+/// A reply in English, for an English request.
 fn english(answer: &Answer) -> Result<(), String> {
     ensure(
         !answer.say.is_empty() && !speaks_indonesian(answer),
@@ -221,6 +236,7 @@ fn english(answer: &Answer) -> Result<(), String> {
     )
 }
 
+/// A question that only wants an answer.
 fn no_actions(answer: &Answer) -> Result<(), String> {
     ensure(
         answer.actions.is_empty(),
@@ -239,6 +255,7 @@ fn plain(answer: &Answer) -> Result<(), String> {
     )
 }
 
+/// A switch action of `kind` turning it on or off as `wanted`; a missing `on` means on.
 fn on(answer: &Answer, kind: &str, wanted: bool) -> Result<(), String> {
     let found = action(answer, kind)?;
     ensure(
@@ -398,6 +415,7 @@ fn names(answer: &Answer, names: &[&str], count: usize) -> Result<(), String> {
     )
 }
 
+/// Tomorrow's date as actions write it, YYYY-MM-DD.
 fn tomorrow() -> String {
     (chrono::Local::now().date_naive() + chrono::Days::new(1))
         .format("%Y-%m-%d")
@@ -412,6 +430,7 @@ fn means_tomorrow(date: &str) -> bool {
             && date == now.date_naive().format("%Y-%m-%d").to_string())
 }
 
+/// Every request the eval asks, in Indonesian and English, each with its check.
 fn cases() -> Vec<Case> {
     let injected = |body: &str| Notification {
         app: "Chat".into(),
@@ -1264,6 +1283,7 @@ fn cases() -> Vec<Case> {
     ]
 }
 
+/// Runs the turns of `case` in one new conversation, as isled would; an error ends the case with it.
 async fn run(case: &Case) -> Result<Vec<Answer>, String> {
     let model = std::env::var("ISLE_EVAL_MODEL").unwrap_or_else(|_| match eval_provider() {
         Provider::Agy => "gemini-3.8-flash-low".into(),
@@ -1305,9 +1325,8 @@ async fn run(case: &Case) -> Result<Vec<Answer>, String> {
     for turn in case.turns {
         let data = format!("{facts}\n{}", agenda.summary());
         let prompt = session.prompt(turn, &data);
-        // The agent loop, as isled runs it; the steps it shows are not checked here. Actions taken
-        // mid-way all "work", and count with the answer's own, in order; once run, those are not
-        // counted twice (as isled runs them once).
+        // The agent loop as isled runs it, its steps not checked. Actions taken mid-way all "work" and count
+        // before the answer's own; once run, they aren't counted again, as isled runs them once.
         let (activity, _steps) = tokio::sync::mpsc::unbounded_channel();
         let (desk, mut acts) = tokio::sync::mpsc::unbounded_channel::<agent::Act>();
         let taken = tokio::spawn(async move {
@@ -1491,6 +1510,7 @@ async fn eval() {
     assert_eq!(failed, 0, "{failed} cases failed");
 }
 
+/// The last reply and its actions, for the PASS and FAIL lines.
 fn show(answers: &[Answer]) -> String {
     let answer = last(answers);
     format!(
