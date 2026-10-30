@@ -103,7 +103,8 @@ impl ClipboardService {
             return Vec::new();
         }
         let cutoff = now_ms() - self.retention_days * 24 * 60 * 60 * 1000;
-        self.history.retain(|item| item.pinned || item.at_ms >= cutoff)
+        self.history
+            .retain(|item| item.pinned || item.at_ms >= cutoff)
     }
 
     /// The `Items` list, built fresh from the history.

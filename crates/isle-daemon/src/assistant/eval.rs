@@ -293,6 +293,7 @@ fn installed_already(answer: &Answer) -> bool {
         "already there",
         "already on your",
         "already on this",
+        "already on here",
         "already have",
         "already got",
         "installed already",
@@ -1418,11 +1419,14 @@ async fn run(case: &Case) -> Result<Vec<Answer>, String> {
             }
         }
     }
-    // Its conversation is not kept: the eval leaves nothing behind.
+    // Its conversation is not kept: the eval leaves nothing behind. Deleting it can wait on the AI (a Codex
+    // stopped mid-turn), so off the one thread every case runs on, as isled does: the others go on meanwhile.
     let id = agy.conversation();
     drop(agy);
     if let Some(id) = id {
-        Brain::forget(provider, &id);
+        tokio::task::spawn_blocking(move || Brain::forget(provider, &id))
+            .await
+            .ok();
     }
     match answers.first() {
         Some(answer) if answers.len() < case.turns.len() => Err(answer.say.clone()),
@@ -1467,7 +1471,12 @@ const REAL_RUN_DIR: &str = "/tmp/isle-eval-run";
 async fn eval() {
     fixture();
     std::fs::remove_dir_all(REAL_RUN_DIR).ok();
-    let limit = Arc::new(Semaphore::new(PARALLEL));
+    // ISLE_EVAL_JOBS=n runs n cases at once (PARALLEL by default).
+    let jobs = std::env::var("ISLE_EVAL_JOBS")
+        .ok()
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(PARALLEL);
+    let limit = Arc::new(Semaphore::new(jobs.max(1)));
     let quick = std::env::var("ISLE_EVAL_QUICK").is_ok_and(|v| v == "1");
     // ISLE_EVAL_ONLY=text runs the cases whose first request contains it.
     let only = std::env::var("ISLE_EVAL_ONLY").unwrap_or_default();

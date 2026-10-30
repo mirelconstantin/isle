@@ -16,11 +16,12 @@ import * as MessageTray from 'resource:///org/gnome/shell/ui/messageTray.js';
 
 import {namesProject} from './actionRules.js';
 import * as Alerts from './alerts.js';
+import {AppUsage} from './appUsage.js';
 import {paletteFor} from './bot.js';
 import {ClipboardHistory} from './clipboard.js';
 import {CommandPalette, clipRow} from './commandPalette.js';
 import {CompactView} from './compact.js';
-import {grabsKeyboard, inhibitScanout, onUiScale, px, uiScale} from './compat.js';
+import {HAS_ACCENT, grabsKeyboard, inhibitScanout, onUiScale, px, uiScale} from './compat.js';
 import {Daemon} from './daemon.js';
 import {BOTTOM_PADDING, ExpandedView, PAGE_HEIGHT, PAGE_TABS} from './expanded.js';
 import {Island} from './island.js';
@@ -34,6 +35,7 @@ import {PeekView} from './peek.js';
 import * as Playback from './playback.js';
 import {KeyboardWatcher, OsdHook, TopBar} from './shell.js';
 import {ShelfHelper} from './shelfHelper.js';
+import {AppsPage} from './pages/apps.js';
 import {CallPage} from './pages/call.js';
 import {CalendarPage} from './pages/calendar.js';
 import {DevicesPage} from './pages/devices.js';
@@ -44,6 +46,7 @@ import {TasksPage} from './pages/tasks.js';
 import {TimerPage} from './pages/timer.js';
 import {UsagePage} from './pages/usage.js';
 import {ReminderWatcher} from './reminders.js';
+import * as Theme from './theme.js';
 import {GREETING, InstalledApps, UNDO_MS, VoiceView, stopUnit, actionTypes, aiSettings, openSetUp, openSignIn, runActions, signInHint, stopPending, voiceContext} from './voice.js';
 import {TextWriter} from './writer.js';
 
@@ -103,8 +106,9 @@ const COMPACT_SHOULDER = 10;
 // not black, where it hangs from the screen's top edge.
 const IN_BAR_RADIUS = 10;
 const IN_BAR_SHOULDER = 7;
-const PEEK_RADIUS = 22;
-// Off a black bar an alert has no bar to fill, so it starts this far below
+// The badge's radius plus the room round it (see PADDING in peek.js): the corners follow the badge.
+const PEEK_RADIUS = 28;
+// Off a black bar the voice view has no bar to fill, so it starts this far below
 // the screen's top instead of below the bar.
 const PEEK_TOP_GLASS = 6;
 const PEEK_SHOULDER = 13;
@@ -141,6 +145,12 @@ const VOICE_WORKING = ['transcribing', 'thinking', 'acting'];
 const DEFAULT_PAGE_ORDER = ['call', 'notifications', 'music', 'focus'];
 /** The AI agents Isle can hear from (see `Agents1` in the daemon). */
 const AGENT_PROVIDERS = ['claude', 'codex'];
+
+/** Whether `alert` waits on screen while no one is there, its time counted once they are back: a reminder,
+ * or a notification, as GNOME's banner does. */
+function waitsWhileAway(alert) {
+    return alert.sticky || alert.kind === 'notification';
+}
 
 /** Builds the island a part at a time, then decides what it shows until `destroy`. */
 export class Controller {
@@ -243,17 +253,21 @@ export class Controller {
             this._settings.set_boolean('system-alerts', true);
         }
         this._notifications = new NotificationCenter(this._settings);
+        this._notifications.remindsOf = id => this._expanded?.pageNamed('calendar')?.remindsOf(id) ?? false;
         this._privacy = new PrivacyMonitor(this._daemon);
         this._call = new CallMonitor(this._privacy, this._settings);
         this._audio = new AudioOutputs();
         this._focusMode = new FocusMode(this._daemon, this._notifications, this._settings);
         this._clipboard = new ClipboardHistory(this._daemon, this._settings);
+        this._appUsage = new AppUsage(this._daemon);
+        this._clearingAppUsage = false;
         this._writer = new TextWriter(this._clipboard);
     }
 
     /** The island and its closed, alert and voice views; the pages follow a step at a time. */
     _buildViews() {
         this._island = new Island();
+        this._syncTheme();
         this._compact = new CompactView(this._daemon, this._settings, this._privacy, this._call);
         // Two, taking turns: a new alert fades in over the one it replaces, rather than swapping in a frame.
         this._peeks = [new PeekView(), new PeekView()];
@@ -272,6 +286,13 @@ export class Controller {
         for (const view of [this._compact, ...this._peeks, this._expanded, this._voice, this._palette])
             this._island.addView(view);
         Main.layoutManager.addChrome(this._island, {trackFullscreen: true});
+        // GNOME Shell shutting down takes the island with the stage, Isle still on, and GNOME 51 runs on a
+        // moment after: nothing of Isle's may run on it then.
+        this._island.connect('destroy', () => {
+            for (const name of [...this._timeouts.keys()])
+                this._cancel(name);
+            this._destroying = true;
+        });
         this._updateGeometry();
         this._render();
     }
@@ -359,7 +380,8 @@ export class Controller {
             () => new TimerPage(this._daemon, this._settings, size),
             () => new TasksPage(this._daemon, size),
             () => new ShelfPage(this._daemon, this._clipboard, this._settings, size),
-            () => new CalendarPage(this._daemon, size),
+            () => new CalendarPage(this._daemon, this._settings, size),
+            () => new AppsPage(this._daemon, this._appUsage, size),
             () => new UsagePage(this._daemon, size),
             () => new DevicesPage(this._daemon, size),
         ];
@@ -374,7 +396,7 @@ export class Controller {
         }
         const expanded = new ExpandedView(this._daemon, this._privacy, this._call, this._settings, pages);
         expanded.connect('page-changed', () => {
-            // Picked by hand (a tab, a swipe) while open; not when opening, nor when a page
+            // Picked by hand (a tab) while open; not when opening, nor when a page
             // (the call's) goes away by itself.
             if (this._expandWanted && expanded.pickedByHand)
                 this._pagePickedAt = Date.now();
@@ -402,7 +424,7 @@ export class Controller {
             this._extension.openPreferences();
         });
         // The next event, for the meeting pill and the Focus page; its link is looked up once.
-        expanded.connect('next-event', (_view, json) => this._onNextEvent(json));
+        expanded.pageNamed('calendar').connect('next-event', (_page, json) => this._onNextEvent(json));
         expanded.connect('meeting-requested', (_view, link) => {
             this.collapse();
             this._openLink(link);
@@ -435,8 +457,16 @@ export class Controller {
         island.connect('notify::hovered', () => this._onHoverChanged());
         // Hidden (under a fullscreen window), nothing can be laid out: it waits until shown again.
         island.connect('notify::mapped', () => this._scheduleWarm());
-        // A new theme or text size restyles every view: laid out ahead again at the next warm-up.
-        island.connect('style-changed', () => (this._viewsWarm = false));
+        // A new theme, accent or text size restyles every view and page: all laid out ahead again once the
+        // island rests closed (not before the first warm-up), else each first showing styles them afresh.
+        island.connect('style-changed', () => {
+            this._viewsWarm = false;
+            if (this._warmedAt === undefined)
+                return;
+            this._expanded.pages.forEach(page => page.markCold());
+            if (this._presentation === 'compact')
+                this._later('warm', WARM_AFTER_CLOSE_MS, () => this._warmUp(true));
+        });
         island.connect('button-release-event', (_actor, event) => this._onClick(event));
         island.connect('touch-event', (_actor, event) => this._onTap(event));
         island.connect('scroll-event', (_actor, event) => this._onAlertScroll(event));
@@ -469,6 +499,8 @@ export class Controller {
         });
         this._shelfHelper.connect('available-changed', () =>
             (this._shelf.helperAvailable = this._shelfHelper.available));
+        // Found already, a step of the build before this one: told now, or the tab says it is missing.
+        this._shelf.helperAvailable = this._shelfHelper.available;
 
         this._compact.connect('width-changed', () => {
             if (this._presentation === 'compact')
@@ -493,8 +525,10 @@ export class Controller {
             this._settingsChanged.push(this._settings.connect(`changed::${key}`, () => this._syncUsage()));
         for (const key of ['event-alerts', 'event-alert-minutes'])
             this._settingsChanged.push(this._settings.connect(`changed::${key}`, () => this._syncEventAlerts()));
-        for (const key of ['hidden-pages', 'world-clocks'])
+        for (const key of ['hidden-pages', 'world-clocks', 'app-usage'])
             this._settingsChanged.push(this._settings.connect(`changed::${key}`, () => this._syncPages()));
+        this._settingsChanged.push(this._settings.connect('changed::app-usage-clear', () => this._syncAppUsage()));
+        this._settingsChanged.push(this._settings.connect('changed::island-theme', () => this._syncTheme()));
         for (const provider of AGENT_PROVIDERS) {
             this._settingsChanged.push(this._settings.connect(`changed::agent-alerts-${provider}`, () =>
                 this._hookAgent(provider)));
@@ -561,9 +595,12 @@ export class Controller {
                 this._syncUpdates();
             else if (name === 'media')
                 this._syncLyrics();
-            else if (name === 'agents')
+            else if (name === 'appUsage')
+                this._syncAppUsage();
+            else if (name === 'agents') {
                 this._syncAgents(true);
-            else if (name === 'clipboard')
+                this._sayPresent(true);
+            } else if (name === 'clipboard')
                 this._syncClipboard();
         });
         daemon.connect('agent-event', (_daemon, event) => this._onAgentEvent(event));
@@ -581,6 +618,9 @@ export class Controller {
                 this._onLatest();
             else if (key === 'agents')
                 this._agentsUnsynced ? this._syncAgents() : this._hookNewAgents();
+            // Back online: an "Offline" still waiting its turn, or on screen, is no longer so.
+            else if (key === 'system' && daemon.state.system?.network?.connected)
+                this._withdrawAlert('network');
         });
         this._settingsChanged.push(this._settings.connect('changed::check-updates', () => this._syncUpdates()));
         this._settingsChanged.push(this._settings.connect('changed::lyrics-online', () => this._syncLyrics()));
@@ -625,7 +665,7 @@ export class Controller {
             if (openSetUp(this._daemon.state.assistant?.model, this._voiceShortcut))
                 this.collapse();
         });
-        this._voice.connect('frame', (_view, time, level) => this._island.setTintMotion(time, level));
+        this._voice.connect('frame', (_view, time, level, work) => this._island.setTintMotion(time, level, work));
         this._voice.connect('size-changed', () => {
             if (this._presentation === 'voice')
                 this._render();
@@ -650,7 +690,9 @@ export class Controller {
         notifications.connect('banner', (_center, notification) => {
             const urgent = notification.urgency === MessageTray.Urgency.CRITICAL;
             this._post(Alerts.notification(notification, urgent, {
-                onShown: () => notifications.acknowledge(notification),
+                // Its sound as it comes; read once someone is there to see it (see `_timeAlert`).
+                onShown: () => notification.playSound(),
+                onSeen: () => notifications.acknowledge(notification),
                 // Taken back by its app: it goes from the island too.
                 onWithdrawn: key => !this._destroying && this._withdrawAlert(key),
             }, this._sharing));
@@ -768,12 +810,46 @@ export class Controller {
     _syncPages() {
         const hidden = this._settings.get_strv('hidden-pages');
         for (const page of this._expanded.pages) {
-            if (page.name !== 'call' && page.name !== 'usage')
+            // Apps has its own switch, which times the app in front too: no tab while nothing is timed.
+            if (page.name === 'apps')
+                page.hidden = !this._settings.get_boolean('app-usage');
+            else if (page.name !== 'call' && page.name !== 'usage')
                 page.hidden = hidden.includes(page.name);
         }
         this._syncUnseen();
         this._syncLyrics();
+        this._syncAppUsage();
         this._expanded.pageNamed('calendar').worldClocks = this._settings.get_boolean('world-clocks');
+    }
+
+    /** The island in Isle's black or in dark glass, with GNOME's accent (see theme.js). */
+    _syncTheme() {
+        Theme.setTheme(this._settings.get_string('island-theme'));
+        const glass = Theme.theme() === 'glass';
+        for (const [name, on] of [['isle-theme-glass', glass], ['isle-accent-system', glass && HAS_ACCENT]]) {
+            if (on)
+                this._island.add_style_class_name(name);
+            else
+                this._island.remove_style_class_name(name);
+        }
+        this._island.refreshTheme();
+    }
+
+    /** Times the app in front while the Apps page's switch is on; clears when asked. */
+    _syncAppUsage() {
+        this._appUsage.enabled = this._settings.get_boolean('app-usage');
+        // Settings cannot call isled's shell-only Clear; it leaves this request for the island, which
+        // resets it once isled has cleared (asked again when isled appears).
+        if (!this._settings.get_boolean('app-usage-clear') || this._clearingAppUsage || !this._daemon.running)
+            return;
+        this._clearingAppUsage = true;
+        this._appUsage.clear().then(cleared => {
+            this._clearingAppUsage = false;
+            if (!cleared || this._destroying || !this._settings)
+                return;
+            this._settings.set_boolean('app-usage-clear', false);
+            this._expanded?.pageNamed('apps')?.refresh();
+        });
     }
 
     /** Lyrics are looked up online only for the Music page, and only while it is in the island. */
@@ -799,7 +875,8 @@ export class Controller {
         // Isle turned off, or Do Not Disturb on, while the link was looked for.
         if (this._destroying || this._notifications.dnd)
             return;
-        this._post(Alerts.meeting(event, link, () => this._openLink(link)));
+        this._post(Alerts.meeting(event, link, () => this._openLink(link),
+            () => this._expanded?.pageNamed('calendar')?.alertShown(event)));
     }
 
     /** Opens a meeting or any other link in the app for it; the island gets out of the way. */
@@ -1018,7 +1095,8 @@ export class Controller {
             break;
         }
         case 'peek': {
-            const inset = this._blendsIn ? top : PEEK_TOP_GLASS * scale;
+            // Off a black bar its room above counts from the screen's top, as much as below.
+            const inset = this._blendsIn ? top : 0;
             size = {width: this._peek.preferredWidth, height: inset + this._peek.preferredHeight, radius: PEEK_RADIUS * scale,
                 shoulder: PEEK_SHOULDER * scale};
             view = this._peek;
@@ -1035,6 +1113,8 @@ export class Controller {
             view = this._compact;
             view.style = inBar ? null : `padding-top: ${top / scale}px;`;
         }
+        // An even width: centred on the display to the pixel, as much room on either side.
+        size.width = 2 * Math.round(size.width / 2);
         view.set_size(size.width, size.height);
         if (this._inTopBar)
             this._topBar.reserveWidth(this._compact.preferredWidth);
@@ -1146,13 +1226,23 @@ export class Controller {
         const glow = this._presentation === 'peek' ? this._alert?.glow : null;
         const tint = voice ? this._botLook.palette.glow : glow ?? (expanded ? this._expanded.tint : null);
         const style = voice || glow ? 'aura' : expanded ? this._expanded.tintStyle : null;
-        if (glow && tint !== this._tint)
-            this._island.setTintMotion(ALERT_GLOW_TIME, ALERT_GLOW_LEVEL);
+        const newGlow = Boolean(glow) && this._alert !== this._glowAlert;
+        this._glowAlert = glow ? this._alert : null;
         if (tint !== this._tint || style !== this._tintStyle) {
             this._tint = tint;
             this._tintStyle = style;
             this._island.setTint(tint, style);
         }
+        // One that waits for an answer breathes; one that tells something is done lights up once.
+        if (newGlow) {
+            // A second ask breathes again from the start.
+            this._island.breathing = false;
+            if (this._alert.sticky)
+                this._island.setTintMotion(ALERT_GLOW_TIME, ALERT_GLOW_LEVEL);
+            else
+                this._island.pulseTint(ALERT_GLOW_TIME, ALERT_GLOW_LEVEL);
+        }
+        this._island.breathing = Boolean(glow && this._alert?.sticky);
     }
 
     // Pointer
@@ -1647,13 +1737,20 @@ export class Controller {
         });
     }
 
-    // An alert goes after its time; a sticky one (a reminder) only counts it while someone is there.
+    // An alert goes after its time; a reminder or a notification only counts it while someone is there.
     _timeAlert() {
         const alert = this._alert;
         if (!alert)
             return;
-        // Not while someone reads it (see `_onHoverChanged`), nor while no one is there for a sticky one.
-        if ((this._pointerOn && !alert.transient) || (alert.sticky && this._compact.idle)) {
+        // No one there: it waits on screen, a notification unread (see `_watchIdle`).
+        if (waitsWhileAway(alert) && this._compact.idle) {
+            this._cancel('alert');
+            return;
+        }
+        // On screen with someone there: a notification is read.
+        alert.onSeen?.();
+        // Not while someone reads it (see `_onHoverChanged`).
+        if (this._pointerOn && !alert.transient) {
             this._cancel('alert');
             return;
         }
@@ -1703,8 +1800,18 @@ export class Controller {
         }
     }
 
+    /** Tells isled the island is there to answer agents' asks, or not: then they ask in their terminals at once.
+     * An isled from before it (not restarted since an update) has no SetPresent, and waits as it did. */
+    _sayPresent(present) {
+        // Never starting isled just to hear the island goes: one not running has no asks waiting.
+        if (present || this._daemon.running)
+            this._daemon.attemptQuietly('agents', 'SetPresent', present);
+    }
+
     /** Shows the first alert in line that still has something to say, once nothing else is on screen. */
     _nextAlert() {
+        if (this._destroying)
+            return;
         // One shows already (the command asked as the assistant closed): the queue waits behind it.
         if (this._alert || !this._island.visible || this._expandWanted || this._voiceOpen || this._paletteOpen ||
             !this._queue.length) {
@@ -2623,6 +2730,7 @@ export class Controller {
     _voiceActions() {
         return {
             daemon: this._daemon,
+            eventCalendar: () => this._settings.get_string('event-calendar'),
             audio: this._audio,
             notifications: this._notifications,
             target: this._voiceTarget,
@@ -2687,14 +2795,14 @@ export class Controller {
         const monitor = global.backend.get_core_idle_monitor();
         const rest = () => {
             this._compact.idle = true;
-            // Away: a reminder on screen waits for them.
-            if (this._alert?.sticky)
+            // Away: a reminder or a notification on screen waits for them.
+            if (this._alert && waitsWhileAway(this._alert))
                 this._cancel('alert');
             if (!this._activeWatch) {
                 this._activeWatch = monitor.add_user_active_watch(() => {
                     this._activeWatch = 0;
                     this._compact.idle = false;
-                    // Back: a reminder that waited starts its time now.
+                    // Back: one that waited is seen, and starts its time now.
                     this._timeAlert();
                 });
             }
@@ -2742,8 +2850,10 @@ export class Controller {
             this._destroyPartial();
             return;
         }
-        // Turned off (the screen locks too): agents waiting on an answer here ask in their terminals at once.
+        // Turned off (the screen locks too): agents waiting on an answer here ask in their terminals at once,
+        // and so do those that ask until Isle is back.
         this._passAgentAsks();
+        this._sayPresent(false);
         // What waits goes with Isle, never shown (a notification marked read, its sound played) as it goes.
         this._queue = [];
         Alerts.stopWatching();
@@ -2791,6 +2901,7 @@ export class Controller {
         this._island.destroy();
         this._writer.destroy();
         this._installedApps.destroy();
+        this._appUsage.destroy();
         this._clipboard.destroy();
         this._call.destroy();
         this._privacy.destroy();
@@ -2855,6 +2966,8 @@ export class Controller {
         for (const part of [this._osd, this._keyboard, this._reminders, this._installedApps])
             part?.destroy();
         this._shelfHelper?.destroy();
+        // No island to answer agents' asks: they ask in their terminals.
+        this._sayPresent(false);
         // The views are the island's once it is on screen (see `_buildIsland`); before, each goes by itself.
         if (!this._island?.get_parent()) {
             for (const view of [this._compact, ...this._peeks ?? [], this._voice, this._palette, this._expanded])
@@ -2863,7 +2976,7 @@ export class Controller {
                 this._pages.forEach(page => page.destroy());
         }
         this._island?.destroy();
-        for (const service of [this._topBar, this._writer, this._clipboard, this._focusMode, this._call,
+        for (const service of [this._topBar, this._writer, this._appUsage, this._clipboard, this._focusMode, this._call,
             this._privacy, this._audio, this._notifications, this._daemon])
             service?.destroy();
         this._settings = null;

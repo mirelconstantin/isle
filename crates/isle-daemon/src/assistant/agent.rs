@@ -135,18 +135,23 @@ fn home() -> PathBuf {
     dirs::home_dir().unwrap_or_default()
 }
 
-/// What the island says while a tool runs, e.g. "Searching ~/Downloads for “ttd”…".
+/// What the island says while a tool runs, in the user's words, e.g. "Searching Downloads for “ttd”…":
+/// folders by name, and a check by what it looks at, never its command line.
 fn describe(call: &Value) -> String {
     match call["type"].as_str() {
         Some("find_files") => {
             let terms = strings(&call["terms"]);
-            let within = call["in"].as_str().filter(|w| !w.is_empty()).unwrap_or("~");
+            let within = call["in"].as_str().unwrap_or_default();
+            let place = folder_name(within).unwrap_or_else(|| "your files".into());
             match terms.first() {
-                Some(term) => format!("Searching {within} for “{term}”…"),
-                None => format!("Searching {within}…"),
+                Some(term) => format!("Searching {place} for “{term}”…"),
+                None => format!("Searching {place}…"),
             }
         }
-        Some("list_folder") => format!("Looking in {}…", path_of(call)),
+        Some("list_folder") => match folder_name(path_of(call)) {
+            Some(name) => format!("Looking in {name}…"),
+            None => "Looking in your home folder…".into(),
+        },
         Some("recent_files") => "Looking at your recent files…".into(),
         Some("read_text") => format!(
             "Reading {}…",
@@ -157,12 +162,36 @@ fn describe(call: &Value) -> String {
             None => "Looking through your apps…".into(),
         },
         Some("top_processes") => "Checking what’s using the computer…".into(),
-        Some("check") => format!(
-            "Checking · {}",
-            call["command"].as_str().unwrap_or_default()
-        ),
+        Some("check") => check_words(call["command"].as_str().unwrap_or_default()).into(),
         Some("chrome_profiles") => "Looking at Chrome’s profiles…".into(),
         _ => "Working…".into(),
+    }
+}
+
+/// A folder by its name ("Downloads"); `None` for the home folder itself.
+fn folder_name(path: &str) -> Option<String> {
+    let path = path.trim().trim_end_matches('/');
+    let home = home();
+    if path.is_empty() || path == "~" || std::path::Path::new(path) == home {
+        return None;
+    }
+    path.rsplit('/')
+        .next()
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+}
+
+/// What a read-only check looks at, in plain words.
+fn check_words(command: &str) -> &'static str {
+    let program = command.split_whitespace().next().unwrap_or_default();
+    match program {
+        "journalctl" => "Reading the system log…",
+        "ping" | "iw" | "rfkill" | "nmcli" | "ip" | "resolvectl" => "Checking the network…",
+        "apt-cache" | "apt" | "dpkg" | "dpkg-query" | "rpm" | "dnf" | "pacman" | "flatpak"
+        | "snap" | "npm" | "pipx" | "which" | "dkms" | "ubuntu-drivers" | "fwupdmgr"
+        | "xdg-mime" | "xdg-settings" => "Checking what’s installed…",
+        _ if command.contains("--version") => "Checking what’s installed…",
+        _ => "Checking this computer…",
     }
 }
 
@@ -285,6 +314,7 @@ async fn ask_in_time(brain: &mut impl Ask, prompt: &str, out: &Out<'_>) -> anyho
         .map_err(|_| anyhow::Error::new(TooLong))??;
     // What starts or stops a command is isled's to say (see `run_command`), never the AI's.
     for action in &mut answer.actions {
+        super::answer::line_in_text(action);
         if let Some(action) = action.as_object_mut() {
             action.remove("spawn");
             action.remove("stop");
@@ -621,11 +651,23 @@ mod tests {
     fn describes_each_step() {
         let find =
             json!({"type": "find_files", "terms": ["ttd", "signature"], "in": "~/Downloads"});
-        assert_eq!(describe(&find), "Searching ~/Downloads for “ttd”…");
+        assert_eq!(describe(&find), "Searching Downloads for “ttd”…");
         assert_eq!(
             describe(&json!({"type": "find_files", "terms": "cv"})),
-            "Searching ~ for “cv”…"
+            "Searching your files for “cv”…"
         );
+        let list = json!({"type": "list_folder", "path": "~/Documents/Work/"});
+        assert_eq!(describe(&list), "Looking in Work…");
+        let home = json!({"type": "list_folder", "path": "~"});
+        assert_eq!(describe(&home), "Looking in your home folder…");
+        let check = |command| describe(&json!({"type": "check", "command": command}));
+        assert_eq!(check("dpkg -l vlc"), "Checking what’s installed…");
+        assert_eq!(check("code --version"), "Checking what’s installed…");
+        assert_eq!(
+            check("journalctl --user -b -p err"),
+            "Reading the system log…"
+        );
+        assert_eq!(check("uname -a"), "Checking this computer…");
         assert!(is_tool(&find) && !is_tool(&json!({"type": "open_url"})));
     }
 

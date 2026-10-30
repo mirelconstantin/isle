@@ -365,10 +365,9 @@ export const CommandCard = GObject.registerClass({
         this._status.visible = ended;
         if (ended) {
             this._statusIcon.gicon = icon(iconName);
-            // Short, so the command keeps its line: a tick and how long, the exit code, or the word.
+            // Short, so the command keeps its line: a tick and how long, or the word.
             const done = card.status === 'done' && card.seconds >= 1 ? elapsed(card.seconds) : null;
-            const failed = card.status === 'failed' && card.exit ? `exit ${card.exit}` : null;
-            this._statusText.text = done ?? failed ?? text;
+            this._statusText.text = done ?? text;
             this._status.style_class = `isle-card-status ${styleClass}`;
         }
         this._foot.visible = waiting || running;

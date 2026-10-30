@@ -530,6 +530,21 @@ export class Bot {
         cr.restore();
     }
 
+    /** The box its body takes, at rest in the shape it is turning to, when painted `size` big:
+     * {x, y, width, height}. */
+    bounds(size) {
+        const radius = size * HEAD;
+        let left = 0, right = 0, top = 0, bottom = 0;
+        for (let i = 0; i < SAMPLES; i++) {
+            const x = radius * this._goalRadii[i] * COS[i], y = radius * this._goalRadii[i] * SIN[i];
+            left = Math.min(left, x);
+            right = Math.max(right, x);
+            top = Math.min(top, y);
+            bottom = Math.max(bottom, y);
+        }
+        return {x: size / 2 + left, y: size / 2 + top, width: right - left, height: bottom - top};
+    }
+
     /** Traces the body's outline, `radius` big, round the origin: a smooth curve through its radii. */
     _trace(cr, radius) {
         const p = this._points;

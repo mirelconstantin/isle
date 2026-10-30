@@ -5,6 +5,7 @@
 // the window it runs in, and the microphone's mute. Event driven, like privacy.js.
 
 import GLib from 'gi://GLib';
+import Gio from 'gi://Gio';
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 
@@ -12,6 +13,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as Signals from 'resource:///org/gnome/shell/misc/signals.js';
 import {getMixerControl} from 'resource:///org/gnome/shell/ui/status/volume.js';
 
+import {BROWSERS, callStreamOf, callWindowIndex, isEngineName, serviceOf, streamOwner} from './callServices.js';
 import {LEVEL_METERS} from './privacy.js';
 
 /** The microphone must be held this long to count: sites open it briefly to ask for permission. */
@@ -31,36 +33,22 @@ const DEFAULT_STREAM_ICON = 'audio-input-microphone';
 const RECHECK_MS = 500;
 /** A tab moving: its old window stops showing the call and another starts within this long (µs) of it. */
 const MOVE_WITHIN_US = 2 * 1000000;
-/** Call services named in window titles, for calls in a browser. */
-const SERVICES = [
-    [/google meet|\bmeet\b/i, 'Google Meet'],
-    [/whatsapp/i, 'WhatsApp'],
-    [/telegram/i, 'Telegram'],
-    [/discord/i, 'Discord'],
-    [/zoom/i, 'Zoom'],
-    [/microsoft teams|\bteams\b/i, 'Microsoft Teams'],
-    [/jitsi/i, 'Jitsi Meet'],
-    [/slack/i, 'Slack'],
-    [/messenger/i, 'Messenger'],
-    [/signal/i, 'Signal'],
-    [/skype/i, 'Skype'],
-    [/webex/i, 'Webex'],
-];
-
-/** Browsers, whose tabs hold web calls (Meet, Zoom, Teams on the web...). */
-const BROWSERS = /chrom|firefox|brave|edge|vivaldi|opera|epiphany|librewolf|zen/i;
-
-/** The call service a window title names, or null. */
-function serviceOf(title) {
-    return SERVICES.find(([pattern]) => pattern.test(title ?? ''))?.[1] ?? null;
-}
-
 /** The lower-case names a stream goes by: its app's id, name and icon. */
 function streamKeys(stream) {
     const iconName = stream.get_icon_name();
     return [stream.get_application_id(), stream.get_name(), iconName === DEFAULT_STREAM_ICON ? null : iconName]
         .filter(Boolean)
         .map(key => key.toLowerCase().replace(/\.desktop$/, ''));
+}
+
+/** The parent of process `pid`, or 0. */
+function parentOf(pid) {
+    try {
+        const [, status] = GLib.file_get_contents(`/proc/${pid}/status`);
+        return Number(/^PPid:\s*(\d+)/m.exec(new TextDecoder().decode(status))?.[1] ?? 0);
+    } catch {
+        return 0;
+    }
 }
 
 /** Whether `app` is the one a stream with `keys` comes from ("Google Chrome", "firefox_firefox"…). */
@@ -104,6 +92,9 @@ export class CallMonitor extends Signals.EventEmitter {
         /** When (µs) the call's window last stopped showing the call: closed, or another tab in front. */
         this._lostAt = 0;
         this._windowNamed = false;
+        /** The app found holding a stream its keys don't name (see `_ownerApp`): {index, app, pending}. */
+        this._owner = null;
+        this._cancellable = new Gio.Cancellable();
 
         this._mixerIds = [
             ...['stream-added', 'stream-removed'].map(signal => this._mixer.connect(signal, () => this._sync())),
@@ -144,7 +135,8 @@ export class CallMonitor extends Signals.EventEmitter {
 
     /** The call's service ("Google Meet") once its window named one, else its app's name. */
     get name() {
-        return this._service ?? this.app?.get_name() ?? this._streamName ?? 'Call';
+        const stream = isEngineName(this._streamName) ? null : this._streamName;
+        return this._service ?? this.app?.get_name() ?? stream ?? 'Call';
     }
 
     /** The call app's icon, or null when the app is unknown. */
@@ -166,16 +158,17 @@ export class CallMonitor extends Signals.EventEmitter {
             this.emit('changed');
     }
 
-    /** The microphone stream of a call, or null. */
+    /** The microphone stream of a call, or null: the call's own while it is still there. */
     _callStream() {
         if (!this._settings.get_boolean('call-activity'))
             return null;
-        return this._mixer.get_source_outputs().find(stream => {
+        const streams = this._mixer.get_source_outputs().filter(stream => {
             const appId = stream.get_application_id();
             if (LEVEL_METERS.includes(appId) || appId === OWN_APP_ID)
                 return false;
             return !streamKeys(stream).some(key => RECORDERS.some(recorder => key.includes(recorder)));
-        }) ?? null;
+        });
+        return callStreamOf(streams, this._stream);
     }
 
     /** Starts a call once the microphone is held long enough, and ends it a while after it is let go. */
@@ -224,6 +217,7 @@ export class CallMonitor extends Signals.EventEmitter {
         this._lostAt = 0;
         this.app = null;
         this._streamName = null;
+        this._owner = null;
         this._setWindow(null);
         this._service = null;
         this.emit('changed');
@@ -232,8 +226,13 @@ export class CallMonitor extends Signals.EventEmitter {
     /** Finds the app and window of `stream`; returns whether they changed. */
     _identify(stream) {
         const keys = streamKeys(stream);
-        const app = this._appSystem.get_running().find(candidate => appMatches(candidate, keys)) ?? null;
+        const app = this._appSystem.get_running().find(candidate => appMatches(candidate, keys)) ??
+            this._ownerApp(stream);
         this._streamName = stream.get_name() || null;
+        // A voice engine's (Discord's) is no browser tab's: no title names it before the sound server names
+        // its app (see `_ownerFound`).
+        if (!app && this._owner?.pending && isEngineName(this._streamName))
+            return false;
         const service = this._service;
         const window = this._chooseWindow(app);
         if (app === this.app && window === this.window && service === this._service)
@@ -241,6 +240,64 @@ export class CallMonitor extends Signals.EventEmitter {
         this.app = app;
         this._setWindow(window);
         return true;
+    }
+
+    /** The app holding `stream` when its names say none (Discord's is "WEBRTC VoiceEngine"): by the process
+     * the sound server says holds it, asked once a stream; null until it answers. */
+    _ownerApp(stream) {
+        const index = stream.get_index();
+        if (this._owner?.index === index)
+            return this._owner.app;
+        this._owner = {index, app: null, pending: true};
+        try {
+            const launcher = new Gio.SubprocessLauncher({flags: Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE});
+            launcher.setenv('LC_ALL', 'C', true);
+            const process = launcher.spawnv(['pactl', 'list', 'source-outputs']);
+            process.communicate_utf8_async(null, this._cancellable, (_process, result) => {
+                let text = null;
+                try {
+                    [, text] = process.communicate_utf8_finish(result);
+                } catch {}
+                this._ownerFound(stream, index, streamOwner(text, index));
+            });
+        } catch {
+            // No pactl: the call apps running are all there is to go by.
+            this._ownerFound(stream, index, null);
+        }
+        return this._owner.app;
+    }
+
+    /** Takes the app the sound server named for `stream`, else the one call app running, and shows it. */
+    _ownerFound(stream, index, owner) {
+        if (this._cancellable.is_cancelled() || this._owner?.index !== index)
+            return;
+        this._owner.pending = false;
+        const engine = isEngineName(stream.get_name());
+        this._owner.app = this._appOfProcess(owner) ?? (engine ? this._onlyCallApp() : null);
+        // A voice engine's waited for this: placed now, by the windows' titles if no app was found.
+        if ((this._owner.app || engine) && this.active && this._stream === stream && this._identify(stream))
+            this.emit('changed');
+    }
+
+    /** The app of process `pid`, or of a parent of it (a voice engine may run in a helper), else the one
+     * named after its `binary` ("Discord"). */
+    _appOfProcess(owner) {
+        if (!owner)
+            return null;
+        const tracker = Shell.WindowTracker.get_default();
+        for (let pid = owner.pid, hop = 0; pid > 1 && hop < 4; pid = parentOf(pid), hop++) {
+            const app = tracker.get_app_from_pid(pid);
+            if (app)
+                return app;
+        }
+        const keys = owner.binary ? [owner.binary.toLowerCase()] : [];
+        return this._appSystem.get_running().find(app => appMatches(app, keys)) ?? null;
+    }
+
+    /** The one app running that is a call service's own (Discord, not a browser), or null if none or several. */
+    _onlyCallApp() {
+        const apps = this._appSystem.get_running().filter(app => !BROWSERS.test(app.get_id() ?? '') && serviceOf(app.get_name()));
+        return apps.length === 1 ? apps[0] : null;
     }
 
     // The call keeps the window it was found in: one titled after a call service, else the app's window
@@ -281,8 +338,9 @@ export class CallMonitor extends Signals.EventEmitter {
         const went = this._service && candidates.find(arrived);
         if (went)
             return went;
-        const named = candidates.find(window => this._service ? serviceOf(window.get_title()) === this._service
-            : serviceOf(window.get_title()));
+        // A new call: of the windows naming a service, the one showing a call under way (see callWindowIndex).
+        const named = this._service ? candidates.find(window => serviceOf(window.get_title()) === this._service)
+            : candidates[callWindowIndex(candidates.map(window => ({title: window.get_title(), focused: window.has_focus()})))];
         if (named) {
             this._service ??= serviceOf(named.get_title());
             return named;
@@ -410,6 +468,7 @@ export class CallMonitor extends Signals.EventEmitter {
     destroy() {
         // Tell no one about changes made while tearing down.
         this.disconnectAll();
+        this._cancellable.cancel();
         this._cancel('start');
         this._cancel('end');
         this._cancel('recheck');

@@ -12,7 +12,7 @@ members = [
 default-members = ["crates/isle-core", "crates/isle-daemon"]
 
 [workspace.package]
-version = "1.4.0"
+version = "1.5.0"
 edition = "2024"
 # isle-core and isled use let chains (1.88); isle-shelf sets its own, for gtk-rs.
 rust-version = "1.88"
@@ -40,7 +40,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Edits Codex's config.toml in place, keeping its comments and layout.
 toml_edit = { version = "0.25", default-features = false, features = ["display", "parse"] }
-tokio = { version = "1", features = ["fs", "io-util", "macros", "process", "rt", "signal", "sync", "time"] }
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt", "signal", "sync", "time"] }
 # No gzip: the few small JSON answers are not worth a deflate implementation.
 ureq = { version = "3", default-features = false, features = ["rustls", "json"] }
 x11rb = "0.14"
@@ -61,3 +61,14 @@ opt-level = "s"
 
 [profile.release.package.isle-shelf]
 opt-level = "s"
+
+# Their libraries too (zbus, tokio, image, ureq...): less code for isled to hold in memory. Not
+# whisper's, which keep full speed.
+[profile.release.package."*"]
+opt-level = "s"
+
+[profile.release.package.whisper-rs]
+opt-level = 3
+
+[profile.release.package.whisper-rs-sys]
+opt-level = 3

@@ -4,6 +4,7 @@
 //! Platform-independent core of Isle: no D-Bus, GTK or network, so every rule that decides
 //! what the island shows can be unit tested in isolation.
 
+pub mod app_usage;
 pub mod calendar;
 pub mod clipboard;
 pub mod lrc;

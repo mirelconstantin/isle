@@ -16,6 +16,9 @@ import {clutterBackend} from './compat.js';
 const CLIPBOARD = St.ClipboardType.CLIPBOARD;
 /** Set by password managers (KeePassXC and others) on secrets they copy. */
 const SECRET_HINT = 'x-kde-passwordManagerHint';
+/** A secret that could not be read stands for any copy this soon after it (µs): better one copy left out. */
+const UNREAD_SECRET_US = 30 * 1000 * 1000;
+const UNREAD = 'unread';
 /** How Files puts copied files on the clipboard. */
 const FILES_TYPE = 'x-special/gnome-copied-files';
 const URI_LIST_TYPE = 'text/uri-list';
@@ -87,8 +90,9 @@ export class ClipboardHistory {
         this._ownCopy = false;
         this._timeouts = new Set();
         this._cancellable = new Gio.Cancellable();
-        /** The text last added: {id, at}, until something else is copied. */
+        /** The text last added, {id, at}, or a secret's salted hash, {secret}; until something else is copied. */
         this._lastText = null;
+        this._salt = GLib.uuid_string_random();
         // Made now: a new virtual device joins the seat a moment later, and drops the first paste.
         this._keyboard = clutterBackend().get_default_seat().create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
 
@@ -113,8 +117,10 @@ export class ClipboardHistory {
         if (!this.enabled)
             return;
         const mimetypes = this._clipboard.get_mimetypes(CLIPBOARD);
-        if (mimetypes.includes(SECRET_HINT))
+        if (mimetypes.includes(SECRET_HINT)) {
+            this._noteSecret(mimetypes);
             return;
+        }
         const app = Shell.WindowTracker.get_default().focus_app;
         // Windows without a desktop file get made-up ids ("window:5").
         const appId = app && !app.is_window_backed() ? app.get_id() : '';
@@ -144,7 +150,11 @@ export class ClipboardHistory {
         // Only the picture's address (a browser's Copy Image gives it as text too) yields to the picture.
         const address = mimetypes.includes(IMAGE_TYPE) && /^\s*(https?|data|file):\S*\s*$/.test(text);
         if (text.replaceAll('\0', '').trim() && !address) {
-            this._addText(text, appId);
+            const last = this._lastText;
+            const hash = last?.secret ? await last.secret : null;
+            const unread = hash === UNREAD && GLib.get_monotonic_time() - last.at < UNREAD_SECRET_US;
+            if (!last?.secret || (!unread && hash !== this._hash(text)))
+                this._addText(text, appId);
         } else if (mimetypes.includes(IMAGE_TYPE)) {
             const png = await this._read(IMAGE_TYPE, MAX_IMAGE_BYTES);
             if (png?.get_size() && !this._destroyed) {
@@ -154,6 +164,21 @@ export class ClipboardHistory {
         } else if (mimetypes.length === 0 || (bytes && !text.replaceAll('\0', ''))) {
             this._forgetSecret();
         }
+    }
+
+    // A secret is never kept, only its hash: when the password manager quits, GNOME puts back what it
+    // held as plain text, without the hint, and that copy must still be left out.
+    _noteSecret(mimetypes) {
+        const textType = TEXT_TYPES.find(type => mimetypes.includes(type));
+        const read = () => textType ? this._read(textType, MAX_TEXT_BYTES) : Promise.resolve(null);
+        // Read again once if it failed; still unread, the next copies a moment later are taken for it.
+        const secret = read().then(bytes => bytes ?? read()).then(bytes => bytes ? this._hash(decode(bytes)) : UNREAD);
+        this._lastText = {secret, at: GLib.get_monotonic_time()};
+    }
+
+    /** `text`'s hash, salted afresh each session: a secret can be recognised but not looked up. */
+    _hash(text) {
+        return GLib.compute_checksum_for_data(GLib.ChecksumType.SHA256, new TextEncoder().encode(this._salt + text));
     }
 
     /** Remembered as the last text, so a password manager clearing it soon after can take it out again. */
@@ -171,7 +196,8 @@ export class ClipboardHistory {
     _forgetSecret() {
         const last = this._lastText;
         this._lastText = null;
-        if (!last || Date.now() - last.at > SECRET_CLEARED_MS || this._destroyed)
+        // After a secret, nothing of the history's was on the clipboard to take out.
+        if (last?.id === undefined || Date.now() - last.at > SECRET_CLEARED_MS || this._destroyed)
             return;
         const item = (this._daemon.state.clipboard ?? []).find(other => other.id === last.id);
         if (item && !item.pinned)

@@ -159,6 +159,7 @@ export const Page = GObject.registerClass({
             return;
         const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, Math.max(0, Math.round(ms)), () => {
             this._timeouts.delete(name);
+            this._kept.delete(name);
             callback();
             return GLib.SOURCE_REMOVE;
         });
@@ -172,6 +173,7 @@ export const Page = GObject.registerClass({
             GLib.source_remove(id);
             this._timeouts.delete(name);
         }
+        this._kept.delete(name);
     }
 
     /** Drops every pending timeout, kept ones too. */

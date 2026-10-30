@@ -15,7 +15,7 @@ import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {TILES, describeActions, failed, namesProject, outcomeOf, runnable, slotsFor, stoppable} from './actionRules.js';
+import {TILES, describeActions, failed, namesProject, outcomeOf, runnable, slotsFor, stoppable, terminalLine} from './actionRules.js';
 import {Bot} from './bot.js';
 import {ChatView, CommandCard, answerMarkup, elapsed} from './chat.js';
 import {isTerminal} from './clipboard.js';
@@ -97,6 +97,8 @@ const MIC_FADE = 2;
 const LEVEL_RATE = 8;
 /** The glow's level when animations are off in GNOME: there, but still. */
 const STILL_LEVEL = 0.2;
+/** How much brighter the light is a moment as an answer arrives (see `_boost`). */
+const REPLY_BOOST = 0.7;
 /** Without the pointer moving for this long (s), the eyes wander on their own. */
 const POINTER_REST_S = 2.5;
 /** Errors that come from not hearing you (isled's wording): it looks confused at them, sad at others. */
@@ -201,7 +203,7 @@ export const VoiceView = GObject.registerClass({
         // A typed request, sent with Enter.
         'typed': {param_types: [GObject.TYPE_STRING]},
         // Each frame: the animation's time (s) and level, to move the island's edge glow with.
-        'frame': {param_types: [GObject.TYPE_DOUBLE, GObject.TYPE_DOUBLE]},
+        'frame': {param_types: [GObject.TYPE_DOUBLE, GObject.TYPE_DOUBLE, GObject.TYPE_DOUBLE]},
         // The + in the conversation, and Undo after it.
         'new-chat': {},
         'undo-new-chat': {},
@@ -395,6 +397,9 @@ export const VoiceView = GObject.registerClass({
         this.stopTyping();
         if (['listening', 'transcribing'].includes(state.phase))
             this._dropEndedCard(state.card);
+        // Answered after working: the light brightens a moment, then settles.
+        if (state.phase === 'reply' && WORKING.includes(this._phase))
+            this._boost = Math.max(this._boost ?? 0, REPLY_BOOST);
         this._phase = state.phase;
         this._syncClose();
         this._exchange = {heard: state.heard ?? '', reply: clip(state.reply ?? '')};
@@ -868,7 +873,7 @@ export const VoiceView = GObject.registerClass({
                 this._timeline.start();
             } else {
                 this._face.queue_repaint();
-                this.emit('frame', 0, STILL_LEVEL);
+                this.emit('frame', 0, STILL_LEVEL, 0);
             }
         } else if (!active) {
             this._timeline.stop();
@@ -933,7 +938,9 @@ export const VoiceView = GObject.registerClass({
         // A little faster while it thinks; summed up, so a change of speed never makes the glow jump.
         const speed = WORKING.includes(this._phase) ? 1.6 : 1;
         this._flow += dt * speed;
-        this.emit('frame', this._flow, this._level);
+        // While it works, the light's streaks shine brighter as they run round; eased, so it never jumps.
+        this._work = (this._work ?? 0) + ((WORKING.includes(this._phase) ? 1 : 0) - (this._work ?? 0)) * (1 - Math.exp(-dt * 3));
+        this.emit('frame', this._flow, this._level, this._work);
     }
 });
 
@@ -999,7 +1006,7 @@ const SIGN_IN = {agy: ['agy'], claude: ['claude'], codex: ['codex', 'login'], gr
 
 /** What to do when no terminal could be opened to sign in. */
 export function signInHint(provider) {
-    return `Run “${(SIGN_IN[provider] ?? SIGN_IN.agy).join(' ')}” in a terminal to sign in, then ask again.`;
+    return `Open a terminal, type “${(SIGN_IN[provider] ?? SIGN_IN.agy).join(' ')}” to sign in, then ask again.`;
 }
 
 /** The AI picked in Settings and the model picked for each, as isled reads them. */
@@ -1036,8 +1043,10 @@ const TYPED_COMMAND = 'printf "\\033[2mIsle: press Enter to run it, edit it firs
 
 /** Opens a terminal with `command` typed in, waiting for the user to press Enter. */
 function typeInTerminal(command) {
-    // On one line: a newline would be an Enter of its own.
-    const line = command.split('\n').map(part => part.trim()).filter(Boolean).join(' && ');
+    const line = terminalLine(command);
+    // What the user could not read whole before pressing Enter is never typed, as a card never offers it.
+    if (line === null)
+        return failed('not typed: it has hidden characters, or is too long to show whole');
     if (!line)
         return failed('no command to type');
     return inTerminal(['bash', '-c', TYPED_COMMAND, 'isle', line]) ? 'typed into a terminal' : failed('no terminal app found');
@@ -1215,7 +1224,8 @@ const ACTIONS = {
     },
     focus: ({command}, {daemon}) => daemon.call('pomodoro', command === 'stop' ? 'Stop' : 'Start'),
     add_task: ({text}, {daemon}) => text && daemon.call('todo', 'Add', text),
-    add_event: ({date, text}, {daemon}) => date && text && daemon.call('calendar', 'Add', date, text),
+    // To the calendar the Calendar page adds to (an account's, or Isle's own).
+    add_event: ({date, text}, {daemon, eventCalendar}) => date && text && daemon.addEvent(eventCalendar(), date, text),
     done_task: ({id}, {daemon}) => Number.isInteger(id) && daemon.call('todo', 'SetDone', id, true),
     remove_task: ({id}, {daemon}) => Number.isInteger(id) && daemon.call('todo', 'Remove', id),
     cancel_reminder: ({id}, {daemon}) => Number.isInteger(id) && daemon.call('reminders', 'Dismiss', id),

@@ -158,6 +158,7 @@ mod tests {
             date: date.into(),
             start: start.map(Into::into),
             end: end.map(Into::into),
+            send: None,
         }
     }
 

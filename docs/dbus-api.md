@@ -8,7 +8,7 @@ milliseconds unless the name says `_us` (microseconds).
 
 Methods that read what the user copied (`Clipboard1.GetText` and `Search`), steer the
 assistant (every `Assistant1` method but `ClearChat`), answer an AI agent
-(`Agents1.Resolve`) or change an AI's settings (`Agents1.SetHooked`) answer
+(`Agents1.Resolve` and `SetPresent`) or change an AI's settings (`Agents1.SetHooked`) answer
 GNOME Shell only, where the extension runs; any other caller gets
 `org.freedesktop.DBus.Error.AccessDenied`.
 
@@ -38,6 +38,12 @@ that played last. Another player starting to play ends the pick.
 
 The position is only sampled when something changes. While playing, the
 current position is `position_us + (now - sampled_at_ms) * 1000 * rate`.
+A player that reports position 0 while it is still playing (Firefox and Zen do)
+does not move that sample; a `Seeked` signal does, and its position is the one
+kept. A length that disappears for the same track is kept. While playing with
+no length yet, isled reads the player again after 1s and after 3s. A relative
+seek, used when the player gives no track id, is measured from this position
+when the player's own `Position` read is 0.
 
 The control methods only fail when no player is running. They return
 without waiting for the player, so a slow player cannot hold the daemon up;
@@ -51,7 +57,7 @@ if the player then rejects the command, isled only logs it.
 | `StartPhase(s phase)` | | Start `focus`, `short_break` or `long_break` right away (`idle` stops). |
 | `Pause()`, `Stop()`, `Skip()` | | `Skip` ends the phase early without counting it. |
 | `SetConfig(s json)` | | Replace the configuration (below). |
-| `State` | `s` | `{phase, running, ends_at_ms, remaining_ms, duration_ms, completed_sessions, sessions_before_long_break, today_sessions, today_focus_ms, history}`; `phase` is `idle`, `focus`, `short_break` or `long_break`; `history` is the last seven days with a session, oldest first, as `[{date, sessions, focus_ms}]` (kept for 30 days). |
+| `State` | `s` | `{phase, running, ends_at_ms, started_at_ms, remaining_ms, duration_ms, completed_sessions, sessions_before_long_break, today_sessions, today_focus_ms, history}`; `phase` is `idle`, `focus`, `short_break` or `long_break`; `started_at_ms` is when the phase first ran, null while it waits to be started (a focus session after a break, without `auto_start_focus`); `history` is the last seven days with a session, oldest first, as `[{date, sessions, focus_ms}]` (kept for 30 days). |
 | `Config` | `s` | `{focus_minutes, short_break_minutes, long_break_minutes, sessions_before_long_break, auto_start_breaks, auto_start_focus}` |
 | `PhaseFinished(s finished, s next)` | signal | A phase ran out (not emitted for `Skip` or `Stop`). |
 
@@ -72,9 +78,26 @@ from GNOME Shell, not from here.)
 | Member | Signature | |
 |---|---|---|
 | `Add(s date, s text) → t id` | | Adds an event on `date` (`YYYY-MM-DD`) from a line of text, taking its time from it: `Dinner 8:00 pm`, `Standup 9:00-9:15`, `Gym at 7pm`; without a time it lasts all day. A date that does not exist, or no title left, is refused with `InvalidArgs`. |
-| `Remove(t id)` | | |
+| `AddTo(s calendar, s date, s text) → s` | | As `Add`, to a desktop calendar: a uid `Calendars` lists, or `"isle"` for Isle's own; `""`, or a uid no longer there, tries each account calendar in order (without waiting on which only read: one that does turns the event down). When none takes it (read only, offline, signed out) the event is kept in Isle's own instead. A calendar out of reach (EDS offline, or its server not taking a TCP connection within 3 seconds; behind a proxy, EDS's word is taken) isn't written to, as EDS would only queue the event: the event waits in Isle's own (its `send`) and isled tries it again every 30 seconds with the same iCalendar uid, so it never lands twice; once there it leaves Isle's own. It stays in Isle's own for good when its calendar goes, or turns it down 10 times running. One its server had, with no answer within 20 seconds, counts as added, so it never shows twice; one still on its way to the server by then waits in Isle's own as above. Returns where it went: the calendar's uid, or `""` for Isle's own. |
+| `Calendars() → s` | | The desktop's calendars a new event can go to, `[{uid, name, account, color}]` by account (its own calendar first) and name: those of Online Accounts and other accounts in Evolution Data Server, without the ones that only read (birthdays, weather, web subscriptions, and any EDS reports as not `Writable`, such as a subscribed holiday calendar) nor EDS's own on this computer. `[]` without accounts; fails (Failed) while EDS can't be asked (not running yet), so that is never taken for no accounts. |
+| `Colors() → s` | | Every desktop calendar's colour, `{uid: "#rrggbb"}`, read only ones too: GNOME Shell's events name their calendar's uid on the first line of their id. `{}` without EDS. |
+| `Parse(s text) → s` | | How `Add` reads `text`, without adding it: `{title, start, end}`, times as `HH:MM` or null. Fails (InvalidArgs) when no title is left. |
+| `Remove(t id)` | | One waiting to be sent is taken out of its calendar too, in case a try with no answer got it there. |
 | `MeetingLink(s source_uid, s event_uid) → s` | | The meeting link of a desktop calendar's event (the first two lines of the id GNOME Shell's calendar server gives it), or `""`. |
-| `Events` | `s` | `[{id, title, date, start, end}]` by day and time; `start` and `end` are `HH:MM` or null (all day; no end given). Events over 400 days old are forgotten. |
+| `Events` | `s` | `[{id, title, date, start, end, send?}]` by day and time; `start` and `end` are `HH:MM` or null (all day; no end given); `send` (`{calendar, uid}`) on one waiting to go to a desktop calendar out of reach (see `AddTo`). Events over 400 days old are forgotten. |
+
+`AddTo` writes through Evolution Data Server: `CalendarFactory.OpenCalendar`,
+`Calendar.Open`, `CreateObjects([event], 0)` and `Close`, each step given five
+seconds. The event is one `VEVENT` with its times in UTC (an hour long without
+an end; a whole day without a time). `Calendars` reads the sources from
+`org.gnome.evolution.dataserver.Sources5` (`ObjectManager.GetManagedObjects`),
+leaving out those turned off, and those of an account whose calendars are off.
+Each one left is opened once (`OpenCalendar`, and `Calendar.Open` when it
+reads as read only, then asked again for up to 3 seconds, as a calendar just
+opened reads as read only until it has reached its server) for its `Writable`
+property. Writable is remembered while isled runs; read only, for an hour, and
+only from a server that takes a connection (out of reach, EDS calls a calendar
+read only for now).
 
 `MeetingLink` reads the event from Evolution Data Server
 (`org.gnome.evolution.dataserver.Calendar8`, else `Calendar7`:
@@ -94,7 +117,7 @@ five seconds) it is `""`; empty or over-long ids are refused with
 |---|---|---|
 | `Add(as uris)` | | Add local `file://` URIs (moved to the front if already there). The shelf holds 6 files: files that do not fit are refused with `LimitsExceeded`. Other URIs are skipped and reported with `InvalidArgs` once the rest are added. |
 | `Remove(s uri)`, `Clear()` | | |
-| `Refresh()` | | Drop items whose files no longer exist. |
+| `Refresh()` | | Drop items whose files no longer exist, shortly after it returns. A file that does not answer within two seconds (a network mount gone offline) stays. |
 | `Items` | `s` | `[{uri, name, added_at_ms}]`, newest first. |
 
 ## io.github.zickrian.isle.Clipboard1
@@ -137,11 +160,31 @@ when it is due, then dismisses it.
 | `Dismiss(t id)` | | Forgets one, once shown (or cancelled). |
 | `Items` | `s` | `[{id, text, due_ms}]`, soonest first. |
 
+## io.github.zickrian.isle.AppUsage1
+
+Time spent in each application, timed by the extension as GNOME's focus
+changes and kept in `~/.local/share/isle/app-usage.json` for 30 days. Only
+the application in front is timed, whether or not there is keyboard or
+pointer input; it stops when focus moves, when no window is in front, or
+when the screen locks. Five minutes without input pause it too, unless a
+program holds the session from going idle (a video playing does). The
+extension keeps the stretches and reports them at most once a minute, when
+the Apps page opens and when timing stops; turning the Apps page or its
+switch in Settings off stops the timing.
+
+Every method is GNOME Shell's: the history names every app the user ran.
+
+| Member | Signature | |
+|---|---|---|
+| `Report(a(ssxx) stretches)` | | Adds timed stretches, each `(app_id, name, start_ms, ms)`: `app_id` is the desktop id (or `window:<wmclass>` when the app has no desktop file), `start_ms` when the stretch began in milliseconds since the Unix epoch, and `ms` how long it lasted. Stretches past local midnight are split between the days. At most 1,000 fit in one call; a blank id, a start before 1970, or a time not between 1 ms and 24 hours refuses the whole batch with `InvalidArgs`. |
+| `GetStats() → s` | | `{today: [{id, name, ms}], week: [{id, name, ms}], month: [{id, name, ms}]}`, most used first; `week` is the last seven days including today, and `month` the last 30 (all that is kept). |
+| `Clear()` | | Forgets every day. |
+
 ## io.github.zickrian.isle.Assistant1
 
 The voice assistant. isled records the microphone, turns speech into text
 (whisper.cpp, through `isle-whisper`), asks the AI picked in Settings
-(Claude Code, Codex or agy, with the user's own sign-in), runs the look-up
+(Claude Code, Codex, Grok or agy, with the user's own sign-in), runs the look-up
 tools the AI asks for (finding files and apps, reading small text files), and
 publishes the answer; the extension runs its actions. It works step by step:
 desktop actions the AI takes mid-way go to the extension in the `acting`
@@ -208,8 +251,9 @@ which puts hooks in that AI's own config, running isled as a client
 | Member | Signature | |
 |---|---|---|
 | `SetHooked(s provider, b on)` | | Puts Isle's hook in `claude`'s or `codex`'s config, or takes it out (below). GNOME Shell only. Fails with `Failed` and a message to show (`Codex already sends its notifications to another program`, a config that does not parse); an unknown `provider` is `InvalidArgs`. |
-| `Decide(s json)` | `s` | From the hook: `{provider, project, cwd, session, tool, input, always, pids}` (`input` the command or file on one line, `always` whether the AI offers to keep a rule, `pids` the hook's parent processes, nearest first, at most 32, so the island can tell the agent's own window by its process). Emits `Asking` and waits, at most 9½ minutes, for `Resolve`: returns `allow`, `always` or `deny`, or `""` when the island will not answer (the AI then asks in its own terminal). Returns `""` at once with 8 already waiting. When the caller leaves the bus first (the user answered in the terminal), it ends and emits `Withdrawn`. |
+| `Decide(s json)` | `s` | From the hook: `{provider, project, cwd, session, tool, input, always, pids}` (`input` the command or file exactly as the AI would run it, cut to 300 characters, `InvalidArgs` with a line break or a character that hides or reorders text; `always` whether the AI offers to keep a rule, which only Claude Code and Grok do; `pids` the hook's parent processes, nearest first, at most 32, so the island can tell the agent's own window by its process). Emits `Asking` and waits, at most 9½ minutes, for `Resolve`: returns `allow`, `always` or `deny`, or `""` when the island will not answer (the AI then asks in its own terminal). Returns `""` at once with 8 already waiting, or while the island is away (`SetPresent`). When the caller leaves the bus first (the user answered in the terminal), it ends and emits `Withdrawn`. |
 | `Resolve(s id, s decision)` | | The island's answer to `Asking` `id`. GNOME Shell only. |
+| `SetPresent(b present)` | | Whether the island is there to answer `Asking`: the extension says `true` once it is built and whenever isled appears, `false` as it is turned off (the screen locks too). Away, every `Decide` waiting returns `""` at once, and new ones do too until it is back; the caller leaving the bus (GNOME Shell stopping or restarting) counts as away, seen within 2 s. Never told (an older extension never says), isled takes the island as there. GNOME Shell only. |
 | `Asking` (signal) | `s` | The `Decide` JSON with its `id`. |
 | `Withdrawn` (signal) | `s` | `id` needs no answer any more. |
 | `Report(s json)` | | From the hook: `{provider, kind, project, cwd, message, session, pids}`. Unknown providers or kinds are `InvalidArgs`. Texts are put on one line and cut (`message` to 160 characters, `project` to 60, `session` to 100); a `cwd` that is not absolute is dropped, and `project` defaults to its last folder. An event follows another of the same `provider` and `kind` by at least 300 ms, or is dropped. |

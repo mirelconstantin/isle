@@ -23,14 +23,19 @@ const TILE_WIDTH = 84;
 const PREVIEW_SIZE = 52;
 const ICON_SIZE = 46;
 const REMOVE_SIZE = 18;
+/** The ×'s disc as the helper draws it: GTK puts its 1.5 px border outside the 18 px. */
+const REMOVE_DISC = REMOVE_SIZE + 3;
 const NAME_WIDTH = 76;
 /** The preview's square plus room above it for the ×. */
 const FRAME_HEIGHT = PREVIEW_SIZE + 6;
 /** How long "copied" shows on a tile. */
 const COPIED_MS = 1100;
-/** The dashed outlines, as the helper's style.css draws them (St borders cannot dash). */
+/** The drop zone's dashed outline, drawn here alone, under the helper's see-through window too: one dash
+ * all the time (St borders cannot dash, and GTK's 1 px dashes are dots). */
 const ZONE_RADIUS = 16;
 const DASH = [4, 3];
+/** A file landing flashes the outline white, fading out over this long. */
+const LANDED_MS = 650;
 /** The drop zone's outline and fill (white alphas): at rest, a file on its way, a file over it. */
 const ZONE = {idle: [0.22, 0.025], near: [0.35, 0.035], over: [0.65, 0.06]};
 /** The light rising inside it from the bottom, until the drop light gives its colours: blue into violet. */
@@ -51,14 +56,19 @@ class FilesView extends St.Widget {
         });
         this._daemon = daemon;
         this._thumbnails = thumbnails;
+        /** isled's last list: kept while it is away, as the helper keeps its own, so the two never disagree. */
+        this._items = [];
         this._helperActive = false;
         this._helperAvailable = false;
         this._dropping = false;
         this._dropOver = false;
-        /** The files on their way can't all land (see ShelfPage's `_refusal`). */
+        /** Why the files on their way can't all land: 'local', 'room' or null (see ShelfPage's `_refusal`). */
+        this._refusal = null;
         this._refused = false;
         /** How lit the zone is (0..1), with the island's drop light, and in which colours. */
         this._light = 0;
+        /** How bright a file's landing still leaves the outline (1 at landing, then down to 0). */
+        this._landed = 0;
         this._glow = ZONE_GLOW;
         this._lastClick = {uri: null, at: 0};
         /** Each file's tile, kept while the file stays, so its preview never reloads (and blinks). */
@@ -88,8 +98,21 @@ class FilesView extends St.Widget {
         // Behind the tiles, so its fill never tints them.
         this._zone = new St.DrawingArea({x_expand: true, y_expand: true, visible: false});
         this._zone.connect('repaint', area => this._paintZone(area));
+        this._landing = new Clutter.Timeline({actor: this._zone, duration: LANDED_MS, progress_mode: Clutter.AnimationMode.EASE_OUT_QUAD});
+        this._landing.connect('new-frame', timeline => {
+            this._landed = 1 - timeline.get_progress();
+            this._zone.queue_repaint();
+        });
+        this._landing.connect('stopped', () => {
+            this._landed = 0;
+            if (!this._destroyed)
+                this._syncZone();
+        });
         this.insert_child_at_index(this._zone, 0);
-        this.connect('destroy', () => (this._destroyed = true));
+        this.connect('destroy', () => {
+            this._destroyed = true;
+            this._landing.stop();
+        });
         this.update();
         // Another scale: the tiles are made again at its size.
         onUiScale(this, () => {
@@ -134,12 +157,14 @@ class FilesView extends St.Widget {
         this._updateEmptyText();
     }
 
-    /** The files on their way can't all land: the zone stays unlit, its outline red. */
-    set refused(refused) {
-        if (refused === this._refused)
+    /** Why the files on their way can't all land, or null: the zone stays unlit, its outline red. */
+    set refusal(refusal) {
+        if (refusal === this._refusal)
             return;
-        this._refused = refused;
+        this._refusal = refusal;
+        this._refused = Boolean(refusal);
         this._zone.queue_repaint();
+        this._updateEmptyText();
     }
 
     /** How lit the zone is (0..1); it follows the island's drop light. */
@@ -155,7 +180,15 @@ class FilesView extends St.Widget {
         this._zone.queue_repaint();
     }
 
-    /** The zone's fill, its rising light and, unless the helper draws them, its dashes. */
+    /** A file landed: the outline flashes white and fades. */
+    flashLanded() {
+        this._landing.stop();
+        this._landed = 1;
+        this._syncZone();
+        this._landing.start();
+    }
+
+    /** The zone's fill, its rising light and its dashes; only the dashes while a landing fades over files. */
     _paintZone(area) {
         const cr = area.get_context();
         const [width, height] = area.get_surface_size();
@@ -165,10 +198,11 @@ class FilesView extends St.Widget {
         const t = full ? 0 : Math.min(1, this._light);
         const [line, fill] = from.map((value, i) => value + (to[i] - value) * t);
         const scale = uiScale();
+        const zone = dragging || this._items.length === 0;
         roundedRect(cr, width, height, ZONE_RADIUS * scale, 0.5 * scale);
-        cr.setSourceRGBA(1, 1, 1, fill);
+        cr.setSourceRGBA(1, 1, 1, zone ? fill : 0);
         cr.fillPreserve();
-        if (t > 0) {
+        if (zone && t > 0) {
             cr.save();
             cr.clipPreserve();
             const glow = new Cairo.RadialGradient(width / 2, height * 1.3, 0, width / 2, height * 1.3, width * 0.55);
@@ -179,38 +213,41 @@ class FilesView extends St.Widget {
             cr.paint();
             cr.restore();
         }
-        if (!this._helperActive) {
-            if (full && dragging)
-                cr.setSourceRGBA(1, 0.36, 0.36, 0.6);
-            else
-                cr.setSourceRGBA(1, 1, 1, line);
-            strokeDashed(cr, scale);
-        }
+        if (full && dragging)
+            cr.setSourceRGBA(1, 0.36, 0.36, 0.6);
+        else
+            cr.setSourceRGBA(1, 1, 1, Math.max(zone ? line : 0, 0.9 * this._landed));
+        strokeDashed(cr, scale);
         cr.$dispose();
+    }
+
+    /** isled's last list (kept while it is away), as the tiles show it. */
+    get items() {
+        return this._items;
     }
 
     /** Redraws from isled's shelf list. */
     update() {
-        const items = this._daemon.state.shelf ?? [];
-        // Not while isled is away (no list), or every preview would go.
-        if (this._daemon.state.shelf)
-            this._thumbnails.keepOnly(items.map(item => item.uri));
+        // While isled is away (no list) the last one stays, previews and all.
+        if (this._daemon.state.shelf) {
+            this._items = this._daemon.state.shelf;
+            this._thumbnails.keepOnly(this._items.map(item => item.uri));
+        }
+        const items = this._items;
         this._syncTiles(items);
         this._syncZone();
         this._tiles.visible = items.length > 0;
         this._empty.visible = items.length === 0;
-        // Under the helper's window they stay laid out but unseen: hidden, the tab would shrink to nothing,
-        // the window (placed by it) would go, they would show again, and round it would go, blinking.
-        for (const actor of [this._tiles, this._empty])
-            actor.opacity = this._helperActive ? 0 : 255;
+        // Under the helper's window the tiles stay laid out but unseen (hidden, the tab would shrink and the
+        // window go, blinking). The empty shelf's words are only drawn here: the helper's are see-through.
+        this._tiles.opacity = this._helperActive ? 0 : 255;
         this._updateEmptyText();
     }
 
-    /** At rest it marks an empty shelf. Under the helper only its fill and light show: the helper,
-     * which can't know the files' colours, draws the dashes. */
+    /** At rest it marks an empty shelf; under the helper's see-through window too, which draws none. */
     _syncZone() {
         const dragging = this._dropping && this._helperAvailable;
-        this._zone.visible = dragging || (this._daemon.state.shelf ?? []).length === 0;
+        this._zone.visible = dragging || this._landed > 0 || this._items.length === 0;
         this._zone.queue_repaint();
     }
 
@@ -238,9 +275,14 @@ class FilesView extends St.Widget {
     /** What the empty shelf says, as the helper does: where to drop, and what then. */
     _updateEmptyText() {
         const dragging = this._dropping && this._helperAvailable;
-        let title = 'Drop files here', hint = 'Then drag them into any app, or click to copy';
+        // The same words as the helper's (crates/isle-shelf), which keeps its own see-through.
+        let title = 'No files on the shelf', hint = 'Drop files here, then drag them into any app';
         if (!this._helperAvailable)
-            [title, hint] = ['No files on the shelf', 'Drag and drop needs the shelf helper; run install.sh again'];
+            [title, hint] = ['No files on the shelf', 'Dropping files here isn’t set up; install Isle again to add it'];
+        else if (dragging && this._dropOver && this._refusal === 'local')
+            [title, hint] = ['Only files on this computer', 'Links and files online can’t be kept'];
+        else if (dragging && this._dropOver && this._refusal)
+            [title, hint] = ['Too many files', 'The shelf holds six at a time'];
         else if (dragging)
             [title, hint] = [this._dropOver ? 'Release to add it' : 'Drop to add it', 'Then drag it into any app, or click to copy it'];
         this._emptyTitle.text = title;
@@ -265,7 +307,7 @@ class FilesView extends St.Widget {
         });
         const remove = iconButton('isle-close-symbolic', 'isle-shelf-remove',
             () => this._daemon.call('shelf', 'Remove', item.uri), {size: 10, accessibleName: 'Remove from the shelf'});
-        remove.set_size(px(REMOVE_SIZE), px(REMOVE_SIZE));
+        remove.set_size(px(REMOVE_DISC), px(REMOVE_DISC));
 
         const tile = this._tileBox(this._frame(preview, {copied, remove}), item.name);
         tile.accessible_name = item.name;
@@ -278,6 +320,9 @@ class FilesView extends St.Widget {
                 return;
             if (shown.image) {
                 preview.add_style_class_name('thumbnail');
+                // A document's page shows whole, as in Files, rather than cut to the square.
+                if (shown.whole)
+                    preview.add_style_class_name('whole');
                 preview.style = `background-image: url("${GLib.filename_to_uri(shown.image, null).replace(/"/g, '%22')}");`;
                 preview.child = null;
             } else if (shown.gicon) {
@@ -308,11 +353,15 @@ class FilesView extends St.Widget {
     _tileBox(frame, name) {
         const box = new St.BoxLayout({...VERTICAL, style_class: 'isle-shelf-tile-box'});
         box.add_child(frame);
-        const text = label(name, 'isle-shelf-name', {width: px(NAME_WIDTH), x_align: Clutter.ActorAlign.CENTER});
+        const text = label(name, 'isle-shelf-name', {width: px(NAME_WIDTH), x_align: Clutter.ActorAlign.CENTER,
+            y_align: Clutter.ActorAlign.CENTER, y_expand: true});
         // Two lines ("Alex Morgan / CV.pdf" whole); only a longer name loses its middle.
         text.clutter_text.set({line_wrap: true, line_wrap_mode: Pango.WrapMode.WORD_CHAR,
             line_alignment: Pango.Alignment.CENTER, ellipsize: Pango.EllipsizeMode.MIDDLE});
-        box.add_child(text);
+        // Two lines' room, a shorter name in its middle, as the helper's (crates/isle-shelf).
+        const lines = new St.Widget({style_class: 'isle-shelf-name-lines', layout_manager: new Clutter.BinLayout()});
+        lines.add_child(text);
+        box.add_child(lines);
         return new St.Button({
             style_class: 'isle-shelf-tile',
             child: box,

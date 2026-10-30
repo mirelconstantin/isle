@@ -7,7 +7,7 @@
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 import {Controller} from './src/controller.js';
-import {setIconDir} from './src/widgets.js';
+import {releaseIconTheme, setIconDir} from './src/widgets.js';
 
 /** The entry point GNOME Shell loads; everything else hangs off the controller. */
 export default class IsleExtension extends Extension {
@@ -21,5 +21,6 @@ export default class IsleExtension extends Extension {
     disable() {
         this._controller?.destroy();
         this._controller = null;
+        releaseIconTheme();
     }
 }

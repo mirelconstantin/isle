@@ -74,6 +74,8 @@ pub struct PomodoroView {
     pub running: bool,
     /// When the phase ends, if running.
     pub ends_at_ms: Option<i64>,
+    /// When the phase first ran; none while it waits to be started.
+    pub started_at_ms: Option<i64>,
     pub remaining_ms: i64,
     pub duration_ms: i64,
     pub completed_sessions: u32,
@@ -89,6 +91,8 @@ pub struct TimerState {
     pub running: bool,
     /// When the phase ends, if running.
     pub ends_at_ms: Option<i64>,
+    /// When the phase first ran.
+    pub started_at_ms: Option<i64>,
     /// Time left, if paused.
     pub remaining_ms: i64,
     pub duration_ms: i64,
@@ -102,6 +106,8 @@ pub struct Pomodoro {
     phase: Phase,
     /// Set while running.
     ends_at: Option<i64>,
+    /// When the phase first ran: a phase waiting to be started has none.
+    started_at: Option<i64>,
     /// Time left while not running.
     remaining_ms: i64,
     /// Length of the current phase, fixed when it began: a config change
@@ -134,6 +140,7 @@ impl Pomodoro {
         Self {
             phase: state.phase,
             ends_at: state.ends_at_ms.filter(|_| state.running),
+            started_at: state.started_at_ms,
             remaining_ms: state.remaining_ms.clamp(0, duration_ms),
             duration_ms,
             completed_sessions: state.completed_sessions,
@@ -147,6 +154,7 @@ impl Pomodoro {
             phase: self.phase,
             running: self.ends_at.is_some(),
             ends_at_ms: self.ends_at,
+            started_at_ms: self.started_at,
             remaining_ms: self.remaining_ms,
             duration_ms: self.duration_ms,
             completed_sessions: self.completed_sessions,
@@ -175,6 +183,7 @@ impl Pomodoro {
             phase: self.phase,
             running: self.ends_at.is_some(),
             ends_at_ms: self.ends_at,
+            started_at_ms: self.started_at,
             remaining_ms: self.remaining(now),
             duration_ms: if self.phase == Phase::Idle {
                 self.config.duration_ms(Phase::Focus)
@@ -208,6 +217,7 @@ impl Pomodoro {
         if self.phase == Phase::Idle {
             self.enter(Phase::Focus, now, true);
         } else {
+            self.started_at.get_or_insert(now);
             self.ends_at = Some(now + self.remaining_ms);
         }
     }
@@ -281,6 +291,7 @@ impl Pomodoro {
         self.duration_ms = duration;
         self.remaining_ms = duration;
         self.ends_at = running.then_some(now + duration);
+        self.started_at = running.then_some(now);
     }
 }
 
@@ -443,6 +454,27 @@ mod tests {
         assert_eq!(view.phase, Phase::ShortBreak);
         assert!(!view.running);
         assert_eq!(view.remaining_ms, 5 * MINUTE_MS);
+    }
+
+    #[test]
+    fn a_session_waiting_to_start_has_no_start_time() {
+        let mut timer = Pomodoro::new(PomodoroConfig {
+            auto_start_focus: false,
+            ..quick().config().clone()
+        });
+        timer.start_phase(Phase::ShortBreak, 0);
+        timer.tick(MINUTE_MS);
+        assert_eq!(timer.view(MINUTE_MS).phase, Phase::Focus);
+        assert_eq!(timer.view(MINUTE_MS).started_at_ms, None);
+        // Started, it keeps its start through a pause, a resume and a restart of isled.
+        timer.start(70_000);
+        timer.pause(80_000);
+        timer.start(90_000);
+        let restored = Pomodoro::restore(timer.config().clone(), timer.state());
+        assert_eq!(restored.view(100_000).started_at_ms, Some(70_000));
+        // The next phase is another.
+        timer.skip(100_000);
+        assert_eq!(timer.view(100_000).started_at_ms, Some(100_000));
     }
 
     #[test]

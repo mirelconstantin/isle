@@ -82,6 +82,10 @@ const INTERFACES = {
     calendar: {
         xml: node('Calendar1', `
             <method name="Add"><arg name="date" type="s" direction="in"/><arg name="text" type="s" direction="in"/><arg type="t" direction="out"/></method>
+            <method name="AddTo"><arg name="calendar" type="s" direction="in"/><arg name="date" type="s" direction="in"/><arg name="text" type="s" direction="in"/><arg type="s" direction="out"/></method>
+            <method name="Calendars"><arg type="s" direction="out"/></method>
+            <method name="Colors"><arg type="s" direction="out"/></method>
+            <method name="Parse"><arg name="text" type="s" direction="in"/><arg type="s" direction="out"/></method>
             <method name="Remove"><arg name="id" type="t" direction="in"/></method>
             <method name="MeetingLink"><arg name="source_uid" type="s" direction="in"/><arg name="event_uid" type="s" direction="in"/><arg type="s" direction="out"/></method>
             <property name="Events" type="s" access="read"/>`),
@@ -99,6 +103,15 @@ const INTERFACES = {
             <method name="Dismiss"><arg name="id" type="t" direction="in"/></method>
             <property name="Items" type="s" access="read"/>`),
         properties: {Items: 'reminders'},
+    },
+    appUsage: {
+        xml: node('AppUsage1', `
+            <method name="Report">
+                <arg name="stretches" type="a(ssxx)" direction="in"/>
+            </method>
+            <method name="GetStats"><arg name="stats" type="s" direction="out"/></method>
+            <method name="Clear"/>`),
+        properties: {},
     },
     usage: {
         xml: node('Usage1', `
@@ -118,6 +131,7 @@ const INTERFACES = {
         xml: node('Agents1', `
             <method name="SetHooked"><arg name="provider" type="s" direction="in"/><arg name="on" type="b" direction="in"/></method>
             <method name="Resolve"><arg name="id" type="s" direction="in"/><arg name="decision" type="s" direction="in"/></method>
+            <method name="SetPresent"><arg name="present" type="b" direction="in"/></method>
             <signal name="Event"><arg name="event" type="s"/></signal>
             <signal name="Asking"><arg name="request" type="s"/></signal>
             <signal name="Withdrawn"><arg name="id" type="s"/></signal>
@@ -327,21 +341,41 @@ export class Daemon extends Signals.EventEmitter {
         return this.attempt(name, method, ...args).then(({result}) => result);
     }
 
+    /** Adds an event to `calendar` (see Calendar1.AddTo); [where it went], or null if refused. An isled from
+     * before AddTo (Isle updated, isled not yet restarted) keeps it in Isle's own instead. */
+    async addEvent(calendar, date, text) {
+        const {result, unknownMethod} = await this.attempt('calendar', 'AddTo', calendar, date, text);
+        // Only for an isled without AddTo: one slow to answer may still add it, and it would show twice.
+        if (!unknownMethod)
+            return result;
+        return await this.call('calendar', 'Add', date, text) ? [''] : null;
+    }
+
     /** As `call`, with why it failed: {result, error}; `error` is isled's own message when it refused. */
     attempt(name, method, ...args) {
+        return this._attempt(name, method, args, false);
+    }
+
+    /** As `attempt`, logging nothing: for a call whose refusal is an answer (Parse, on a line with no title). */
+    attemptQuietly(name, method, ...args) {
+        return this._attempt(name, method, args, true);
+    }
+
+    _attempt(name, method, args, quiet) {
         const proxy = this._proxies[name];
         if (!proxy)
             return Promise.resolve({result: null, error: null});
         return new Promise(resolve => {
             try {
                 proxy[`${method}Remote`](...args, (result, error) => {
-                    if (error)
+                    if (error && !quiet)
                         console.warn(`Isle: ${method} failed: ${error.message}`);
                     // isled's own words: why it would not (Failed), or what was wrong with what it was asked (InvalidArgs).
-                    const refused = error && ['org.freedesktop.DBus.Error.Failed', 'org.freedesktop.DBus.Error.InvalidArgs']
-                        .includes(Gio.DBusError.get_remote_error(error));
+                    const name = error ? Gio.DBusError.get_remote_error(error) : null;
+                    const refused = ['org.freedesktop.DBus.Error.Failed', 'org.freedesktop.DBus.Error.InvalidArgs'].includes(name);
                     // "GDBus.Error:org.freedesktop.DBus.Error.Failed: <isled's words>"
-                    resolve({result: error ? null : result, error: refused ? error.message.replace(/^GDBus\.Error:[\w.]+:\s*/, '') : null});
+                    resolve({result: error ? null : result, error: refused ? error.message.replace(/^GDBus\.Error:[\w.]+:\s*/, '') : null,
+                        unknownMethod: name === 'org.freedesktop.DBus.Error.UnknownMethod'});
                 });
             } catch (e) {
                 // Arguments that do not fit the method's signature.

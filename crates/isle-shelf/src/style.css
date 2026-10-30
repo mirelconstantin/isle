@@ -12,26 +12,23 @@ window.isle-shelf {
   font-feature-settings: "tnum";
 }
 
-/* The whole window takes drops. Dashed outline: grey when empty or mid-drop, brighter under the
- * pointer, red if full. Fill and light are the island's beneath (files.js, dropLight.js). */
+/* Takes drops all over. Outline, fill and light are the island's beneath (files.js, dropLight.js):
+ * GTK draws 1 px dashes as dots. The border keeps its room, and is never quite clear (0 or 1 of 255): with
+ * nothing at all to draw GTK draws no frame, and the last one stayed up (a removed tile), or, on a first
+ * show, none came (a black window). */
 .drop-area {
   border-radius: 16px;
-  border: 1px dashed transparent;
+  border: 1px solid alpha(#ffffff, 0.003);
   transition: border-color 200ms ease-out;
 }
 
-.drop-area.empty { border-color: alpha(#ffffff, 0.22); }
-.drop-area.dropping { border-color: alpha(#ffffff, 0.35); }
-.drop-area.over { border-color: alpha(#ffffff, 0.65); }
-.drop-area.full { border-color: alpha(#ff5c5c, 0.6); }
+/* An unseen change as a file comes near, so the window draws then: without those frames, drops near
+ * its edges were lost (the rig's drag test). */
+.drop-area.dropping { border-color: alpha(#ffffff, 0.004); }
 
-/* A file landed: the outline flashes white and fades out. */
-@keyframes landed {
-  from { border-color: alpha(#ffffff, 0.9); }
-  to { border-color: transparent; }
-}
-
-.drop-area.landed { animation: landed 650ms ease-out; }
+/* The empty shelf's icon and words are the island's beneath (files.js): GTK draws text its own way, so
+ * they would change, bolder, as this window came over them. Here they only keep their room. */
+.empty { opacity: 0; }
 
 .empty-icon { margin-bottom: 2px; }
 .empty-title { font-size: 15px; font-weight: 600; }
@@ -61,6 +58,8 @@ window.isle-shelf {
 
 /* A file type's icon stands alone; a thumbnail fills the square. */
 .tile .preview.thumbnail { background-color: #2c2c2e; }
+/* A document's page, whole on a clear square, as in Files (`square_texture`). */
+.tile .preview.page { background-color: transparent; border-radius: 0; }
 
 .tile .copied {
   border-radius: 12px;

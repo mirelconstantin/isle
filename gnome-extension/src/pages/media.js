@@ -118,7 +118,7 @@ class MediaPage extends Page {
             y_align: Clutter.ActorAlign.END,
             visible: false,
         });
-        // Sits over the corner, half outside it, like on a Mac.
+        // Sits over the corner, half outside it.
         onUiScale(badge, scale => badge.set_translation(5 * scale, 5 * scale, 0));
         this._badges.push({badge, icon: badgeIcon});
 
@@ -471,7 +471,7 @@ class MediaPage extends Page {
         const position = Playback.positionMs(nowPlaying);
         const length = Playback.lengthMs(nowPlaying);
         const elapsed = Format.duration(position);
-        // A minus sign, not a hyphen, as a Mac's player shows it.
+        // A minus sign, not a hyphen.
         const remaining = length > 0 ? `\u2212${Format.duration(length - position)}` : '';
         this._elapsed.forEach(text => (text.text = elapsed));
         this._remaining.forEach(text => (text.text = remaining));

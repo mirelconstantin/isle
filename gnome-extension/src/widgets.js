@@ -16,6 +16,8 @@ import {onUiScale, px, uiScale} from './compat.js';
 let iconDir = null;
 /** Icons by name, made once: a GIcon never changes, and looking for the file is a disk access. */
 const icons = new Map();
+/** The desktop's icon theme, asked by `isSymbolic` (made when first needed). */
+let iconTheme = null;
 
 /** Tells `icon()` where the extension's bundled icons live. */
 export function setIconDir(dir) {
@@ -23,14 +25,14 @@ export function setIconDir(dir) {
     icons.clear();
 }
 
-/** GNOME's icons that Isle draws itself (icons/), in SF Symbols' manner; a name or the start of one. */
+/** GNOME's icons that Isle draws itself (icons/), in one rounded, even-weight style; a name or the start of one. */
 const OWN_ICONS = {
     'audio-volume-muted': 'isle-speaker-off-symbolic',
     'audio-volume-low': 'isle-speaker-1-symbolic',
     'audio-volume-medium': 'isle-speaker-2-symbolic',
     'audio-volume-high': 'isle-speaker-3-symbolic',
     'audio-volume-overamplified': 'isle-speaker-3-symbolic',
-    'audio-speakers': 'isle-speaker-2-symbolic',
+    'audio-speakers': 'isle-speaker-device-symbolic',
     'audio-card': 'isle-speaker-2-symbolic',
     'audio-headphones': 'isle-headphones-symbolic',
     'audio-headset': 'isle-headphones-symbolic',
@@ -58,6 +60,9 @@ const OWN_ICONS = {
     'input-mouse': 'isle-mouse-symbolic',
     'input-keyboard': 'isle-keyboard-symbolic',
     'phone': 'isle-phone-symbolic',
+    'input-gaming': 'isle-gamepad-symbolic',
+    'input-tablet': 'isle-tablet-symbolic',
+    'computer': 'isle-laptop-symbolic',
     'dialog-warning': 'isle-warning-symbolic',
     'dialog-information': 'isle-info-symbolic',
     'software-update-available': 'isle-update-symbolic',
@@ -73,6 +78,11 @@ function ownName(name) {
     const key = OWN_KEYS.find(k => base === k ||
         (base.startsWith(`${k}-`) && !OTHER_STATE.test(base.slice(k.length + 1))));
     return key ? OWN_ICONS[key] : null;
+}
+
+/** Whether Isle draws GNOME's icon `name` itself (see `OWN_ICONS`). */
+export function hasOwnIcon(name) {
+    return ownName(name) !== null;
 }
 
 /** `gicon` in Isle's own style when Isle draws it (GNOME's OSD and device icons), else as it is. */
@@ -173,9 +183,14 @@ export function revealClose(button, shown) {
     button.ease({opacity: shown ? 255 : 0, duration: shown ? 140 : 100, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
 }
 
-/** The music bars move about this often (ms), whatever the display: each step is too small to see more of,
- * and every frame of a 144 Hz display cost the shell twice the work (the island's other motion keeps its rate). */
-const BARS_STEP_MS = 1000 / 60 - 4;
+/** The music bars move about this often (ms), whatever the display. A timer, not a timeline: a running
+ * timeline has the shell draw every frame of the display (144 a second on some), six times the CPU. */
+const BARS_STEP_MS = 1000 / 60;
+/** The recording dot's fade steps this often (ms), on a timer for the same reason. */
+const DOT_STEP_MS = 1000 / 30;
+/** Its fade: from full to this opacity and back, each way this long (ms). */
+const DOT_LOW = 110;
+const DOT_FADE_MS = 900;
 
 /** A pill-shaped text button. */
 export function pillButton(text, styleClass, onClick) {
@@ -188,6 +203,66 @@ export function pillButton(text, styleClass, onClick) {
     button.connect('clicked', () => onClick());
     return button;
 }
+
+/** Lays its children out in a row at their natural sizes, going on to a line below where the next would not
+ * fit, so none is ever cut. Sized from the width it is given each time, nothing kept between. */
+export const WrapLayout = GObject.registerClass(
+class WrapLayout extends Clutter.LayoutManager {
+    /** `spacing`: between children and between lines, in stage pixels. */
+    _init(spacing = 0) {
+        super._init();
+        this._spacing = spacing;
+    }
+
+    set spacing(spacing) {
+        this._spacing = spacing;
+        this.layout_changed();
+    }
+
+    /** The lines `width` makes of the shown children: each [child, width, height], and the line's height. */
+    _lines(container, width) {
+        const lines = [];
+        let line = null, used = 0;
+        for (const child of container.get_children().filter(each => each.visible)) {
+            const [, childWidth] = child.get_preferred_width(-1);
+            const [, childHeight] = child.get_preferred_height(childWidth);
+            if (!line || used + this._spacing + childWidth > width) {
+                line = {children: [], height: 0};
+                lines.push(line);
+                used = -this._spacing;
+            }
+            line.children.push([child, childWidth, childHeight]);
+            line.height = Math.max(line.height, childHeight);
+            used += this._spacing + childWidth;
+        }
+        return lines;
+    }
+
+    vfunc_get_preferred_width(container, _forHeight) {
+        const widths = container.get_children().filter(child => child.visible).map(child => child.get_preferred_width(-1));
+        const natural = widths.reduce((sum, [, width]) => sum + width, 0) + this._spacing * Math.max(0, widths.length - 1);
+        return [Math.max(0, ...widths.map(([min]) => min)), natural];
+    }
+
+    vfunc_get_preferred_height(container, forWidth) {
+        const lines = this._lines(container, forWidth < 0 ? Infinity : forWidth);
+        const height = lines.reduce((sum, line) => sum + line.height, 0) + this._spacing * Math.max(0, lines.length - 1);
+        return [height, height];
+    }
+
+    vfunc_allocate(container, box) {
+        const width = box.get_width();
+        let y = box.y1;
+        for (const line of this._lines(container, width)) {
+            let x = box.x1;
+            for (const [child, childWidth, childHeight] of line.children) {
+                child.allocate(new Clutter.ActorBox({x1: x, y1: y, x2: x + Math.min(childWidth, width), y2: y + childHeight}));
+                x += childWidth + this._spacing;
+            }
+            y += line.height + this._spacing;
+        }
+    }
+});
 
 /** Opacity of disabled controls: still visible, clearly not available. */
 const DISABLED_OPACITY = 90;
@@ -399,10 +474,9 @@ class Bars extends St.BoxLayout {
             this.add_child(bar);
         }
         // One clock moves every bar: an ease per bounce made garbage many times a second.
-        this._clock = new Clutter.Timeline({actor: this, duration: 1000, repeat_count: -1});
-        this._clock.connect('new-frame', () => this._step());
+        this._timer = 0;
         this._now = 0;
-        this._steppedAt = -Infinity;
+        this._last = 0;
         this.connect('destroy', () => this._onDestroy());
         onUiScale(this, () => (this.maxHeight = this._maxHeight));
     }
@@ -452,23 +526,24 @@ class Bars extends St.BoxLayout {
             bounce.start = -1;
             // Slowed down as ease() is.
             bounce.duration = (180 + Math.random() * 220) * settings.slow_down_factor;
-            if (!this._clock.is_playing()) {
+            if (!this._timer) {
                 this._now = 0;
-                this._steppedAt = -Infinity;
-                this._clock.start();
+                this._last = GLib.get_monotonic_time();
+                this._timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, Math.round(BARS_STEP_MS), () => {
+                    this._step();
+                    return GLib.SOURCE_CONTINUE;
+                });
             }
         } else if (!this._bounces.some(other => other.on)) {
-            this._clock.stop();
+            this._stopClock();
         }
     }
 
     /** One tick of the shared clock: each bouncing bar moves along its curve. */
     _step() {
-        this._now += this._clock.get_delta();
-        // Frames in between change nothing, so the shell draws nothing new for them (see BARS_STEP_MS).
-        if (this._now - this._steppedAt < BARS_STEP_MS)
-            return;
-        this._steppedAt = this._now;
+        const now = GLib.get_monotonic_time();
+        this._now += (now - this._last) / 1000;
+        this._last = now;
         for (let i = 0; i < this._bounces.length; i++) {
             const bounce = this._bounces[i];
             if (!bounce.on)
@@ -491,7 +566,13 @@ class Bars extends St.BoxLayout {
     _stop() {
         for (const bounce of this._bounces)
             bounce.on = false;
-        this._clock.stop();
+        this._stopClock();
+    }
+
+    _stopClock() {
+        if (this._timer)
+            GLib.source_remove(this._timer);
+        this._timer = 0;
     }
 
     /** Leaves no clock running. */
@@ -501,10 +582,22 @@ class Bars extends St.BoxLayout {
     }
 });
 
+/** Lets go of the icon theme `isSymbolic` asks, once Isle is turned off. */
+export function releaseIconTheme() {
+    iconTheme = null;
+}
+
 /** Whether `gicon` is a one-colour (symbolic) icon rather than an app's. */
 export function isSymbolic(gicon) {
-    if (gicon instanceof Gio.ThemedIcon)
-        return gicon.get_names().some(name => name.endsWith('-symbolic'));
+    // The name asked for: GLib adds a "-symbolic" variant to every app's icon (com.mitchellh.ghostty too),
+    // so that one counts only when the theme has nothing else (Adwaita's dialog-information).
+    if (gicon instanceof Gio.ThemedIcon) {
+        const [name] = gicon.get_names();
+        if (!name || name.endsWith('-symbolic'))
+            return Boolean(name);
+        iconTheme ??= new St.IconTheme();
+        return !iconTheme.has_icon(name) && iconTheme.has_icon(`${name}-symbolic`);
+    }
     if (gicon instanceof Gio.FileIcon)
         return Boolean(gicon.get_file().get_basename()?.includes('-symbolic'));
     return false;
@@ -761,7 +854,7 @@ function allocateAt(actor, x, y, width, height) {
     actor.allocate(Clutter.ActorBox.new(x, y, x + width, y + height));
 }
 
-/** Motions an alert's icon makes once as it appears, as SF Symbols' effects: steps of [values, ms, easing].
+/** Motions an alert's icon makes once as it appears: steps of [values, ms, easing].
  * Transforms only, so nothing is laid out or restyled again. */
 const MOTIONS = {
     // A small hop: notifications, an answer, a new version.
@@ -785,6 +878,16 @@ const RISE_DELAY = 120;
 /** Motions waiting for their actor to be on screen (GNOME skips eases on actors that are not). */
 const pendingMotions = new WeakMap();
 
+/** Eases `props` of `actor` with Clutter's own implicit animation: `ease` without its callbacks and bookkeeping,
+ * which cost a page switch a millisecond per tab. A later change to the same property takes over. */
+export function easeTo(actor, props, duration, mode = Clutter.AnimationMode.EASE_OUT_QUAD) {
+    actor.save_easing_state();
+    actor.set_easing_duration(duration);
+    actor.set_easing_mode(mode);
+    actor.set(props);
+    actor.restore_easing_state();
+}
+
 /** Slides `actor` along `axis` ('x' or 'y') from `from` to `to` px, in whole pixels: between two pixels a picture
  * or text is resampled and shivers. `onDone` runs on arrival; a later slide on the same axis takes over. */
 export function slideBy(actor, axis, from, to, {delay = 0, duration = 0, onDone = null} = {}) {
@@ -803,7 +906,13 @@ export function slideBy(actor, axis, from, to, {delay = 0, duration = 0, onDone 
         actor.connect('destroy', () => ['x', 'y'].forEach(each => actor[`_isleSlide${each}`]?.stop()));
     }
     const timeline = new Clutter.Timeline({actor, duration, delay, progress_mode: Clutter.AnimationMode.EASE_OUT_CUBIC});
-    timeline.connect('new-frame', () => (actor[property] = Math.round(from + (to - from) * timeline.get_progress())));
+    // Only when the whole pixel changes: each write re-places the actor's whole subtree and re-picks the pointer.
+    let last = from;
+    timeline.connect('new-frame', () => {
+        const value = Math.round(from + (to - from) * timeline.get_progress());
+        if (value !== last)
+            actor[property] = last = value;
+    });
     timeline.connect('completed', () => {
         actor[property] = to;
         onDone?.();
@@ -1215,22 +1324,26 @@ class RecordingDot extends St.Widget {
     /** Breathes again each time it is shown. */
     _init() {
         super._init({style_class: 'isle-recording-dot', y_align: Clutter.ActorAlign.CENTER});
+        this._timer = 0;
         this.connect('notify::mapped', () => this._breathe());
+        this.connect('destroy', () => this._timer && GLib.source_remove(this._timer));
     }
 
     /** Starts the slow fade in and out; off screen it rests fully lit. */
     _breathe() {
-        this.remove_transition('opacity');
+        if (this._timer)
+            GLib.source_remove(this._timer);
+        this._timer = 0;
         this.opacity = 255;
-        if (!this.mapped)
+        if (!this.mapped || !St.Settings.get().enable_animations)
             return;
-        // Only animates while on screen; stops by itself when hidden.
-        this.ease({
-            opacity: 110,
-            duration: 900,
-            mode: Clutter.AnimationMode.EASE_IN_OUT_SINE,
-            autoReverse: true,
-            repeatCount: -1,
+        const start = GLib.get_monotonic_time();
+        this._timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, Math.round(DOT_STEP_MS), () => {
+            // Down and up again, eased in and out (as a sine).
+            const phase = ((GLib.get_monotonic_time() - start) / 1000 / DOT_FADE_MS) % 2;
+            const t = (1 - Math.cos(Math.PI * phase)) / 2;
+            this.opacity = Math.round(255 - (255 - DOT_LOW) * t);
+            return GLib.SOURCE_CONTINUE;
         });
     }
 });

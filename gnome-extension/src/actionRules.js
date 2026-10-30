@@ -111,6 +111,13 @@ export function showsWhole(text, max) {
         ![...text].some(c => c.charCodeAt(0) < 0x20 || (c.charCodeAt(0) >= 0x7f && c.charCodeAt(0) <= 0x9f));
 }
 
+/** The line `command` is typed into a terminal as, its lines joined by `&&` (a newline would be an Enter of its
+ * own); null for one the user could not see whole there, as a card would not offer it. */
+export function terminalLine(command) {
+    const line = command.split('\n').map(part => part.trim()).filter(Boolean).join(' && ');
+    return showsWhole(line, MAX_COMMAND) ? line : null;
+}
+
 /** Whether a window `title` names `project` as a word of its own: "isle — Terminal", not "WhatsApp" for "app". */
 export function namesProject(title, project) {
     if (!project)

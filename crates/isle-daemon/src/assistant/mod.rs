@@ -348,7 +348,7 @@ impl AssistantService {
     fn send(&self, command: Command) -> fdo::Result<()> {
         self.commands
             .send(command)
-            .map_err(|_| fdo::Error::Failed("the assistant stopped".into()))
+            .map_err(|_| fdo::Error::Failed("The assistant stopped. Try again.".into()))
     }
 
     /// A new request while one is answered would wait unseen behind it (see `hold`): refused, so the island
@@ -1249,10 +1249,13 @@ pub async fn run(iface: InterfaceRef<AssistantService>, data: Sources, mut comma
                 let (status, text, ok) = match ended {
                     tasks::Ended::Exited(0) => ("done", format!("{}: done.", task.why), true),
                     tasks::Ended::Exited(code) => {
+                        // The chat keeps the command's own last words, for the user and the AI; the
+                        // code goes to the log.
                         let last = output.lines().last().unwrap_or_default().to_owned();
+                        warn!("{} ended with exit {code}", task.command);
                         (
                             "failed",
-                            format!("{} failed (exit {code}). {last}", task.why),
+                            format!("{} didn’t finish. {last}", task.why),
                             false,
                         )
                     }
@@ -1274,7 +1277,14 @@ pub async fn run(iface: InterfaceRef<AssistantService>, data: Sources, mut comma
                 tasks::forget(&task);
                 tasks::clean(&task);
                 show_history(&iface, &talk.chat).await;
-                if let Err(err) = AssistantService::notice(iface.signal_emitter(), &text, ok).await
+                // The alert says it in a line; why is in the chat, which a click on it opens (the
+                // shortcut may be another, or none).
+                let said = if status == "failed" {
+                    format!("{} didn’t finish. Click to see why.", task.why)
+                } else {
+                    text
+                };
+                if let Err(err) = AssistantService::notice(iface.signal_emitter(), &said, ok).await
                 {
                     warn!("could not tell how a command ended: {err}");
                 }
@@ -1399,15 +1409,18 @@ async fn turn(
                     let missing = format!("{err:#}").contains("not downloaded");
                     return fail(
                         iface,
-                        if missing {
-                            set_up(MODEL_MISSING, &model)
-                        } else {
-                            SPEECH_FAILED.into()
-                        },
+                        set_up(
+                            if missing {
+                                MODEL_MISSING
+                            } else {
+                                SPEECH_FAILED
+                            },
+                            &model,
+                        ),
                     )
                     .await;
                 }
-                Ok(Err(_)) => return fail(iface, SPEECH_FAILED).await,
+                Ok(Err(_)) => return fail(iface, set_up(SPEECH_FAILED, &model)).await,
                 Err(command) => return Some(command),
             }
         }
@@ -1862,7 +1875,7 @@ fn hold(command: Command, later: &mut VecDeque<Command>) {
 
 const NOT_SET_UP: (&str, &str) = (
     "Voice isn’t set up",
-    "Set up downloads the speech model once (or run isle-setup-voice).",
+    "Set up downloads speech recognition, once.",
 );
 const NOTHING_HEARD: (&str, &str) = ("Didn’t catch that", "Press Super+I and speak again.");
 const MUTED: (&str, &str) = (
@@ -1871,7 +1884,7 @@ const MUTED: (&str, &str) = (
 );
 const MODEL_MISSING: (&str, &str) = (
     "Speech model not downloaded",
-    "Set up downloads the one chosen in Settings (or run isle-setup-voice).",
+    "Set up downloads the one chosen in Settings.",
 );
 
 /// `failure`, fixed by setting up speech recognition with `model`.
@@ -1884,7 +1897,7 @@ fn set_up(failure: (&str, &str), model: &str) -> Failure {
 }
 const SPEECH_FAILED: (&str, &str) = (
     "Speech recognition failed",
-    "Try again; if it keeps failing, run isle-setup-voice.",
+    "Try again. If it keeps failing, Set up puts it right.",
 );
 const NO_MIC: (&str, &str) = (
     "No microphone",

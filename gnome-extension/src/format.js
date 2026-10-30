@@ -39,7 +39,7 @@ export function shortcutLabel(accelerator) {
     return [...modifiers, key.length === 1 ? key.toUpperCase() : key[0].toUpperCase() + key.slice(1)].join('+');
 }
 
-/** "Tue 20 Oct", like a Mac's menu bar. */
+/** "Tue 20 Oct", short and calm in the top bar. */
 export function longDate(dateTime = GLib.DateTime.new_now_local()) {
     return dateTime.format('%a %-d %b');
 }
@@ -69,8 +69,10 @@ export function ago(dateTime) {
     return dateTime.format(minutes < 6 * 24 * 60 ? '%a' : '%-d %b');
 }
 
-/** A span of time as "1h 15m", "25m" or "0m". */
+/** A span of time as "1h 15m", "25m", "<1m" or "0m". */
 export function hoursMinutes(ms) {
+    if (ms < 60000)
+        return ms > 0 ? '<1m' : '0m';
     const minutes = Math.round(ms / 60000);
     const hours = Math.floor(minutes / 60);
     if (!hours)

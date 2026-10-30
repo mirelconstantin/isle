@@ -74,7 +74,7 @@ export default class IslePreferences extends ExtensionPreferences {
             about.add(row);
         about.add(link('Website', 'Features, installing and updating', 'https://github.com/zickrian/isle'));
         about.add(link('Report a problem', 'On GitHub; paste the report below in it', 'https://github.com/zickrian/isle/issues/new/choose'));
-        const report = new Adw.ActionRow({title: 'Copy a bug report', subtitle: 'Versions, a check of what works, and recent logs (isled --report)',
+        const report = new Adw.ActionRow({title: 'Copy a bug report', subtitle: 'What’s installed, what works, and recent activity, ready to paste into a report',
             activatable: true});
         report.add_suffix(new Gtk.Image({icon_name: 'edit-copy-symbolic'}));
         report.connect('activated', () => copyReport(window, report));
@@ -90,7 +90,7 @@ export default class IslePreferences extends ExtensionPreferences {
             action: 'Reset',
         }, () => {
             // Not Isle's state: which update was announced, the page asked for, and a focus session's Do Not Disturb.
-            const state = ['update-shown', 'prefs-page', 'focus-dnd-owned'];
+            const state = ['update-shown', 'prefs-page', 'focus-dnd-owned', 'focus-dnd-declined'];
             for (const key of settings.settings_schema.list_keys().filter(key => !state.includes(key)))
                 settings.reset(key);
         }));
@@ -108,7 +108,7 @@ export default class IslePreferences extends ExtensionPreferences {
             description: found.length
                 ? 'How much of your plans\' limits is used, on a Usage page in the open island, with a warning ' +
                   'as one nears its end. Found from the apps you are signed in to; nothing else to set up.'
-                : 'Sign in to Claude Code (claude), Codex (codex) or Grok (grok) and your plan shows up here.',
+                : 'Sign in to Claude Code, Codex or Grok and your plan shows up here.',
         });
         const enabled = switchRow(settings, 'usage-enabled', 'Show AI usage', 'The Usage page and its warnings');
         group.add(enabled);
@@ -137,7 +137,7 @@ export default class IslePreferences extends ExtensionPreferences {
             const agentGroup = new Adw.PreferencesGroup({
                 title: 'AI Agents',
                 description: 'Answer your coding agents from the island when they ask, and know when they are done. ' +
-                    'On by default; off removes Isle\'s hook from that agent\'s settings.',
+                    'On by default; off, Isle stops getting that agent\'s alerts.',
             });
             for (const {provider, title, subtitle} of agents) {
                 agentGroup.add(switchRow(settings, `agent-alerts-${provider}`, title, subtitle));
@@ -154,7 +154,7 @@ export default class IslePreferences extends ExtensionPreferences {
         const group = new Adw.PreferencesGroup({
             title: 'Voice Assistant',
             description: 'Press the shortcut (or the ✦ in the open island) and speak. Speech is recognised on this ' +
-                'computer (set up once with isle-setup-voice in a terminal); the request goes to the AI you pick, with your ' +
+                'computer (Set up downloads it, once); the request goes to the AI you pick, with your ' +
                 'own sign-in and plan.',
         });
         group.add(switchRow(settings, 'voice-assistant', 'AI assistant',
@@ -317,6 +317,10 @@ export default class IslePreferences extends ExtensionPreferences {
         const page = new Adw.PreferencesPage({title: 'Island', icon_name: 'preferences-desktop-appearance-symbolic'});
 
         const look = new Adw.PreferencesGroup({title: 'Appearance'});
+        look.add(choiceRow(settings, 'island-theme', 'Island', 'Isle’s own black, or dark glass that shows what is behind it, blurred', [
+            ['black', 'Black'],
+            ['glass', 'Glass'],
+        ]));
         look.add(topBarRow(settings, window));
         look.add(switchRow(settings, 'compact-top-bar', 'Compact top bar', 'A slimmer top bar that frames the island like a bezel'));
         look.add(switchRow(settings, 'island-in-top-bar', 'Island inside the top bar',
@@ -342,6 +346,7 @@ export default class IslePreferences extends ExtensionPreferences {
         look.add(delay);
         page.add(look);
         page.add(pagesGroup(settings, window));
+        page.add(appUsageGroup(settings, window));
         page.add(worldClocksGroup(settings, window));
 
         const shortcuts = new Adw.PreferencesGroup({
@@ -417,8 +422,8 @@ export default class IslePreferences extends ExtensionPreferences {
         }
         if (!config) {
             group.add(new Adw.ActionRow({
-                title: 'Isle’s background service is not running',
-                subtitle: 'Run the installer again, or start it with “systemctl --user start isled”.',
+                title: 'The timer settings aren’t available right now',
+                subtitle: 'Isle isn’t running in the background. Log out and back in, or install Isle again.',
             }));
             return page;
         }
@@ -695,7 +700,7 @@ function agentsFound() {
     }
     return [
         {provider: 'claude', title: 'Claude Code', subtitle: 'Allow, deny or always allow, and when it is done'},
-        {provider: 'codex', title: 'Codex', subtitle: 'Allow or deny, and when it is done · trust the hook once in /hooks'},
+        {provider: 'codex', title: 'Codex', subtitle: 'Allow or deny, and when it is done · in Codex, type /hooks once and allow Isle'},
     ].filter(({provider}) => agents[provider]?.found);
 }
 
@@ -724,7 +729,7 @@ function topBarRow(settings, window) {
     const current = () => settings.get_user_value('top-bar-opacity') ? settings.get_int('top-bar-opacity')
         : settings.get_string('top-bar-style') === 'black' ? 100 : 0;
     const describe = value => {
-        row.subtitle = value <= 0 ? 'See-through, like on a Mac' : value >= 100 ? 'The island blends into the bar'
+        row.subtitle = value <= 0 ? 'See-through glass' : value >= 100 ? 'The island blends into the bar'
             : `${value}% black`;
     };
     let syncing = false;
@@ -785,12 +790,15 @@ function pagesGroup(settings, window) {
         group.add(row);
         return [name, row];
     });
-    // The Usage page's own switch, here too, so every tab is in one place.
+    // The Apps and Usage pages' own switches, here too, so every tab is in one place.
+    const apps = switchRow(settings, 'app-usage', 'Apps', 'Time spent in each app, kept on this computer for 30 days');
+    apps.add_prefix(new Gtk.Image({icon_name: 'view-app-grid-symbolic'}));
+    group.add(apps);
     const usage = switchRow(settings, 'usage-enabled', 'AI Usage', 'Your AI plans’ limits, and warnings as one nears its end');
     usage.add_prefix(new Gtk.Image({icon_name: 'power-profile-performance-symbolic'}));
     if (!usageProviders().length) {
         usage.sensitive = false;
-        usage.subtitle = 'Sign in to Claude Code or Codex to see your plan';
+        usage.subtitle = 'Sign in to Claude Code, Codex or Grok to see your plan';
     }
     group.add(usage);
     // Not a page but the ✦ beside the tabs: turning it off is how to use Isle without any AI.
@@ -813,6 +821,24 @@ function pagesGroup(settings, window) {
         return false;
     });
     sync();
+    return group;
+}
+
+/** What the Apps page keeps, and a way to forget it; its switch is with the other pages. */
+function appUsageGroup(settings, window) {
+    const group = new Adw.PreferencesGroup({
+        title: 'App Usage',
+        description: 'With the Apps page on, the app in front is timed. Five minutes without input pause it, unless a video keeps the screen awake.',
+    });
+    const clear = new Adw.ActionRow({title: 'Clear app usage', subtitle: 'Forget every day recorded so far'});
+    const button = new Gtk.Button({label: 'Clear…', valign: Gtk.Align.CENTER});
+    button.connect('clicked', () => confirm(window, {
+        heading: 'Clear app usage?',
+        body: 'Every app’s time recorded so far is removed. This cannot be undone.',
+        action: 'Clear',
+    }, () => settings.set_boolean('app-usage-clear', true)));
+    clear.add_suffix(button);
+    group.add(clear);
     return group;
 }
 
@@ -1303,28 +1329,37 @@ function versionIn(dir) {
     }
 }
 
-/** Why the installer stopped, from its output: its own "Isle: …" line, a connection that failed, else its
- * last words ("No space left on device"). */
+/** Why the installer stopped, in plain words: from its own "Isle: …" line or a program's error, a known
+ * reason; anything else is said as a try again (the details stay in the installer's log). */
 function updateFailure(output) {
     const escapes = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
     // Not Isle's markers, nor the steps ("==> Downloading").
     const lines = output.split('\n').map(line => line.replace(escapes, '').trim())
         .filter(line => line && !/^isle-update(-pid|-done)? /.test(line) && !line.startsWith('==>'));
-    const said = lines.filter(line => line.startsWith('Isle: ')).pop();
-    if (said)
-        return said.slice('Isle: '.length);
-    // curl: no such host, refused, timed out, TLS or the connection dropped; or GitHub answered an error.
-    if (lines.some(line => /^curl: \((6|7|28|35|56)\)/.test(line)))
-        return 'GitHub couldn’t be reached; check the internet connection';
-    if (lines.some(line => /^curl: \(22\)/.test(line)))
-        return 'GitHub couldn’t send it just now; try again in a while';
-    const last = lines.pop();
-    if (!last)
-        return 'the installer stopped';
-    // A program's own error: the reason when it is a known one ("No space left on device"), else the line
-    // without the program's name ("install: …", "isle-installer: line 1: …").
-    const reason = /: (No space left on device|Permission denied|Read-only file system|Disk quota exceeded)$/.exec(last);
-    return reason ? reason[1] : last.replace(/^[\w.-]+: (line \d+: )?/, '');
+    const all = lines.join('\n');
+    const reasons = [
+        // curl: no such host, refused, timed out, TLS or the connection dropped.
+        [/could not reach GitHub|^curl: \((6|7|28|35|56)\)/m, 'Isle couldn’t reach GitHub; check the internet connection'],
+        [/GitHub limits how often/, 'GitHub limits how often it is asked; try again in an hour'],
+        [/GitHub answered|^curl: \(22\)/m, 'GitHub had a problem just now; try again in a while'],
+        [/no release .*was found/, 'That version isn’t on GitHub yet; try again later'],
+        [/damaged|checksum|unexpected layout|download failed/, 'The download didn’t come through whole; try again'],
+        [/made for GNOME Shell (\d+ to \d+)/, 'This version of Isle doesn’t support this GNOME yet; nothing was changed'],
+        [/No space left on device|Disk quota exceeded/, 'The disk is full; free some space and try again'],
+        [/Permission denied|Read-only file system/, 'Isle couldn’t write its files; try again'],
+        [/please install (\S+) first/, null],
+        // Failures another try won't fix as it is: no build for this kind of computer, or one install at a time.
+        [/no ready-built Isle for/, 'There’s no ready-made Isle for this computer; build it from source instead'],
+        [/another install of Isle is running/, 'Another install of Isle is running; wait for it, then try again'],
+        // Settings' own line when the installer couldn't be started at all.
+        [/the update didn.t start/, 'The update didn’t start; try again'],
+    ];
+    for (const [pattern, words] of reasons) {
+        const found = pattern.exec(all);
+        if (found)
+            return words ?? `Install ${found[1]}, then try again`;
+    }
+    return lines.length ? 'The update didn’t finish; try again' : 'the installer stopped';
 }
 
 /** The last update per its log, {version, text, done: exit status or null, running}, or null. Running: its
@@ -1485,7 +1520,7 @@ function updateRows(settings, window, version, dir) {
         } else if (newer && packaged) {
             const arch = GLib.file_test('/etc/arch-release', GLib.FileTest.EXISTS);
             show('software-update-available-symbolic', ['accent'], `Isle ${checked.latest} is out`, arch
-                ? 'In packaging/aur: git pull, then makepkg -si; then log out and back in'
+                ? 'Update it the way you installed it from the AUR, then log out and back in'
                 : `Download its .${GLib.file_test('/etc/debian_version', GLib.FileTest.EXISTS) ? 'deb' : 'rpm'} and open it to install, then log out and back in`,
             arch ? [how] : [how, download]);
         } else if (newer) {
@@ -1506,7 +1541,8 @@ function updateRows(settings, window, version, dir) {
         try {
             startUpdate(latest);
         } catch (e) {
-            GLib.file_set_contents(UPDATE_LOG, `isle-update ${latest}\nIsle: ${e.message}\nisle-update-done 1\n`);
+            console.warn(`Isle: could not start the update: ${e.message}`);
+            GLib.file_set_contents(UPDATE_LOG, `isle-update ${latest}\nIsle: the update didn’t start\nisle-update-done 1\n`);
         }
         sync();
     });
@@ -1534,7 +1570,7 @@ function updateRows(settings, window, version, dir) {
 function copyReport(window, row) {
     const isled = findProgram('isled');
     if (!isled) {
-        row.subtitle = 'isled was not found; is Isle installed?';
+        row.subtitle = 'Isle isn’t fully installed; install it again, then try this';
         return;
     }
     const process = Gio.Subprocess.new([isled, '--report'], Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_MERGE);
@@ -1544,7 +1580,8 @@ function copyReport(window, row) {
             window.get_display().get_clipboard().set(output);
             row.subtitle = 'Copied: paste it into the report on GitHub';
         } catch (e) {
-            row.subtitle = `Could not make the report: ${e.message}`;
+            console.warn(`Isle: could not make the report: ${e.message}`);
+            row.subtitle = 'Couldn’t make the report; try again';
         }
     });
 }

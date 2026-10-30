@@ -25,7 +25,7 @@ const LOOK = {
     landed: {level: 1, breathe: 0, period: 1, speed: 2.6},
 };
 /** The flare stays this long before it sinks (the island's 'aura' fade-out follows). */
-const FLARE_MS = 320;
+const FLARE_MS = 450;
 /** A drop let go over the shelf waits this long for the file to show up in isled's list. */
 const LANDING_MS = 1500;
 /** Once its colour is gone, the light keeps moving this long while it fades. */

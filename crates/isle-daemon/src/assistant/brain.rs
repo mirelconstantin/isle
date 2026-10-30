@@ -364,7 +364,7 @@ pub fn explain(provider: Provider, error: &str) -> Failure {
     ]) {
         return Failure::from((
             &*format!("{name} needs Node.js"),
-            "Install Node.js 18 or newer, or reinstall it with its own installer.",
+            "Reinstall it with its own installer, then ask again.",
         ));
     }
     if says(&["could not start"]) {
@@ -438,7 +438,7 @@ pub fn explain(provider: Provider, error: &str) -> Failure {
     if says(&["eacces", "os error 13"]) || (says(&["permission denied"]) && error.contains('/')) {
         return Failure::from((
             &*format!("{name} can’t write its own files"),
-            "Its folder may belong to root (after running it with sudo once); give it back to you, then ask again.",
+            "Reinstalling it with its own installer usually puts this right.",
         ));
     }
     if says(&[

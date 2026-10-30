@@ -12,6 +12,9 @@ import {PACKAGE_VERSION} from 'resource:///org/gnome/shell/misc/config.js';
 
 const SHELL_MAJOR = parseInt(PACKAGE_VERSION, 10);
 
+/** GNOME 47 and later have an accent colour, which St's stylesheets read as -st-accent-color. */
+export const HAS_ACCENT = SHELL_MAJOR >= 47;
+
 /** Vertical box params: GNOME 48 added `orientation`, GNOME 51 dropped `vertical`. */
 export const VERTICAL = SHELL_MAJOR >= 48
     ? {orientation: Clutter.Orientation.VERTICAL}

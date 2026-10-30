@@ -4,6 +4,7 @@
 // Drives `isle-shelf`, the GTK window over the Files tab that does drag and drop
 // (shell actors cannot); started as a drag begins, shown once the island covers it.
 
+import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
@@ -39,6 +40,7 @@ const ShelfWindowProxy = Gio.DBusProxy.makeProxyWrapper(`
   <method name="SetDropping"><arg name="dropping" type="b" direction="in"/></method>
   <signal name="Dragging"><arg name="active" type="b"/></signal>
   <signal name="Hovering"><arg name="uris" type="as"/></signal>
+  <signal name="Drawn"/>
 </interface></node>`);
 
 /** Errors meaning the helper cannot be started at all. */
@@ -54,6 +56,12 @@ const CANNOT_START = [
 const DRAG_PROXIMITY = 120;
 /** How soon a new place for the window is looked at again; see `sync`. */
 const RECHECK_MS = 24;
+/** The helper's window fades in over the island's own tiles for this long (ms), then takes over. */
+const FADE_IN_MS = 120;
+/** A helper from before 1.5 never says it has drawn: its window fades in this long (ms) after its first frame. */
+const DRAWN_WAIT_MS = 300;
+/** A `Drawn` this recent (µs) still counts for a window that comes up just after it. */
+const DRAWN_RECENT_US = 500 * 1000;
 /** How long the Files tab may take to settle before the window is placed without another change. */
 const SETTLE_MS = 2000;
 /** A drag that opened the shelf and then goes this far off closes it again. */
@@ -128,8 +136,13 @@ export class ShelfHelper extends Signals.EventEmitter {
         // Its window comes up anew each time it shows (an X11 window that maps is a new one).
         this._windowAdded = global.top_window_group.connect('child-added', (_group, actor) => {
             if (actor instanceof Meta.WindowActor)
-                this._watchWindow(actor.meta_window);
+                this._watchWindow(actor.meta_window, {fresh: true});
         });
+        /** Whether the window shows over the tab now (faded in), so the tab's own tiles can go. */
+        this._windowShown = false;
+        /** A window waiting to fade in (see `_watchWindow`), and when the helper last said it drew. */
+        this._reveal = null;
+        this._drawnAt = 0;
     }
 
     /** Whether the helper is installed, so files can be dropped on the shelf. */
@@ -173,9 +186,9 @@ export class ShelfHelper extends Signals.EventEmitter {
         const wanted = this._wantedRect();
         if (!wanted) {
             this._candidate = null;
-            // Mid-drag a passing layout change must not take the window from under the file:
-            // it would leave and come back, and the light would blink.
-            if (Main.overview.visible || !(this._dragNear && this._shownRect && this._page.active && this._page.visible && this._island.mapped))
+            // Mid-drag a passing layout change must not take the window from under the file: it would leave
+            // and come back, and the light would blink. Nor while a file is carried out of it: the drag would end.
+            if (Main.overview.visible || !(this._dragging || (this._dragNear && this._shownRect && this._page.active && this._page.visible && this._island.mapped)))
                 this._hide();
             // Waiting for the shape to cover the island, or for the Files tab to settle (a fade cut short ends
             // with no event): looked at again for a while, as no other change may come.
@@ -233,9 +246,9 @@ export class ShelfHelper extends Signals.EventEmitter {
                 return;
             }
             if (!error) {
-                // The island's own tiles stay until the window is up, so
-                // the tab is never blank in between.
-                if (this._shownRect)
+                // The island's own tiles stay until the window has faded in over them (see `_watchWindow`),
+                // so the tab is never blank in between, nor do the two tell apart.
+                if (this._shownRect && this._windowShown)
                     this._page.helperActive = true;
                 if (!this._window)
                     global.get_window_actors().forEach(actor => this._watchWindow(actor.meta_window));
@@ -284,8 +297,10 @@ export class ShelfHelper extends Signals.EventEmitter {
     _wantedRect() {
         const page = this._page;
         const area = page.helperArea;
+        // Fully shown, the island's fade in over too: the window, which doesn't fade with it, would come
+        // ahead of the rest.
         if (!area || Main.overview.visible || !page.active || !page.visible || !area.mapped ||
-            page.translation_x !== 0 || page.opacity !== 255 || area.opacity !== 255)
+            page.translation_x !== 0 || area.get_paint_opacity() !== 255)
             return null;
         // First shown once the shape covers it; after that its last bounces (a moment smaller than it
         // settles) must not take the window down and up again, so it is held while the shape will cover it.
@@ -309,8 +324,9 @@ export class ShelfHelper extends Signals.EventEmitter {
         return {rect: inside ? body : tab, area: tab};
     }
 
-    /** Follows the helper's window while it is up, to check its size (see `_checkScale`). */
-    _watchWindow(window) {
+    /** Follows the helper's window while it is up, to check its size (see `_checkScale`). One just mapped
+     * (`fresh`) fades in over the tab's own tiles, which go once it is in. */
+    _watchWindow(window, {fresh = false} = {}) {
         if (!window || window === this._window || !isHelperWindow(window))
             return;
         this._forgetWindow();
@@ -319,14 +335,80 @@ export class ShelfHelper extends Signals.EventEmitter {
             window.connect('size-changed', () => this._checkScale()),
             window.connect('unmanaged', () => this._forgetWindow()),
         ];
+        const actor = window.get_compositor_private();
+        if (fresh && actor) {
+            // Hidden until it has both a frame on screen and GTK's drawing in it: a window just mapped can show
+            // what X had before GTK drew (black). A helper that never says it drew is waited for a moment.
+            actor.opacity = 0;
+            // A `Drawn` just before this window came up is this window's, used once.
+            const early = Boolean(this._drawnAt) && GLib.get_monotonic_time() - this._drawnAt < DRAWN_RECENT_US;
+            this._drawnAt = 0;
+            const reveal = this._reveal = {
+                framed: false,
+                drawn: early,
+                timer: 0,
+                actor,
+                frameId: 0,
+                fadeIn: () => {
+                    if (this._reveal !== reveal || !reveal.framed || !reveal.drawn)
+                        return;
+                    this._cancelReveal();
+                    actor.ease({
+                        opacity: 255,
+                        duration: FADE_IN_MS,
+                        mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+                        onStopped: () => this._windowIn(window),
+                    });
+                },
+            };
+            reveal.frameId = actor.connect('first-frame', () => {
+                actor.disconnect(reveal.frameId);
+                reveal.frameId = 0;
+                if (this._reveal !== reveal)
+                    return;
+                reveal.framed = true;
+                if (!reveal.drawn) {
+                    reveal.timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, DRAWN_WAIT_MS, () => {
+                        reveal.timer = 0;
+                        reveal.drawn = true;
+                        reveal.fadeIn();
+                        return GLib.SOURCE_REMOVE;
+                    });
+                }
+                reveal.fadeIn();
+            });
+        } else {
+            this._windowIn(window);
+        }
         this._checkScale();
+    }
+
+    /** The window is in over the tab: the tab's own tiles can go. */
+    _windowIn(window) {
+        if (window !== this._window)
+            return;
+        this._windowShown = true;
+        if (this._shownRect && this._placing === 0)
+            this._page.helperActive = true;
+    }
+
+    /** Stops waiting to fade a window in. */
+    _cancelReveal() {
+        const reveal = this._reveal;
+        if (reveal?.timer)
+            GLib.source_remove(reveal.timer);
+        if (reveal?.frameId)
+            reveal.actor.disconnect(reveal.frameId);
+        this._reveal = null;
     }
 
     /** Lets go of the helper's window once it is gone. */
     _forgetWindow() {
+        this._cancelReveal();
         this._windowIds?.forEach(id => this._window.disconnect(id));
         this._windowIds = null;
         this._window = null;
+        this._windowShown = false;
     }
 
     // GTK in the helper may start before GNOME tells X11 apps the scale, and draw the window at another size
@@ -389,6 +471,7 @@ export class ShelfHelper extends Signals.EventEmitter {
         if (!this._shownRect)
             return;
         this._shownRect = this._shownArea = null;
+        this._windowShown = false;
         this._page.helperActive = false;
         this._proxy?.HideRemote(() => {});
     }
@@ -423,6 +506,16 @@ export class ShelfHelper extends Signals.EventEmitter {
                     // Before 1.0 the helper never says; the light keeps its own colours then.
                     this._hoveringId = proxy.connectSignal('Hovering', (_proxy, _sender, [uris]) =>
                         this.emit('drag-files', uris));
+                    // 1.5: the window drew since it came up; it fades in on that (see `_watchWindow`).
+                    this._drawnId = proxy.connectSignal('Drawn', () => {
+                        if (this._reveal) {
+                            this._reveal.drawn = true;
+                            this._reveal.fadeIn();
+                        } else if (!this._window) {
+                            // Before its window is seen: kept for it (see `_watchWindow`).
+                            this._drawnAt = GLib.get_monotonic_time();
+                        }
+                    });
                     this._signalProxy = proxy;
                     this._ownerId = proxy.connect('notify::g-name-owner', () => this._onOwnerChanged(proxy));
                     this.sync();
@@ -554,6 +647,7 @@ export class ShelfHelper extends Signals.EventEmitter {
         if (this._draggingId) {
             this._signalProxy.disconnectSignal(this._draggingId);
             this._signalProxy.disconnectSignal(this._hoveringId);
+            this._signalProxy.disconnectSignal(this._drawnId);
             this._signalProxy.disconnect(this._ownerId);
         }
         this._proxy = null;

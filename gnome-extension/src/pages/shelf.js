@@ -433,7 +433,7 @@ export const ShelfPage = GObject.registerClass({
             if (!['landing', 'landed'].includes(this._light.state))
                 this._light.off();
         }
-        this._files.refused = dropping && Boolean(this._refusal);
+        this._files.refusal = dropping ? this._refusal : null;
         this._updateFilesHint();
     }
 
@@ -469,8 +469,10 @@ export const ShelfPage = GObject.registerClass({
     /** The drag ended; `onShelf` if it was let go over the drop zone. Returns whether the shelf turned it away. */
     endDrop(onShelf) {
         const refused = onShelf && Boolean(this._refusal);
-        if (onShelf && !refused)
+        if (onShelf && !refused) {
             this._light.release();
+            this._files.flashLanded();
+        }
         this.dropping = false;
         return refused;
     }
@@ -478,7 +480,7 @@ export const ShelfPage = GObject.registerClass({
     // Why the files on their way can't all land, as the helper refuses them: 'local' (none is on this
     // computer) or 'room' (more than fit; files already on the shelf only move up); else null.
     get _refusal() {
-        const shelf = this.daemon.state.shelf ?? [];
+        const shelf = this._files.items;
         const local = this._hovered?.filter(uri => uri.startsWith('file://'));
         if (local?.length === 0)
             return 'local';
@@ -490,14 +492,14 @@ export const ShelfPage = GObject.registerClass({
     /** The light, zone and hint say whether the files on their way can land. */
     _syncRefusal() {
         const refusal = this._refusal;
-        this._files.refused = Boolean(refusal);
+        this._files.refusal = refusal;
         this._updateFilesHint();
         this._light.approach(this._dropOver, Boolean(refusal));
     }
 
     /** Says what the Files tab is for, and when it is full. */
     _updateFilesHint() {
-        const count = (this.daemon.state.shelf ?? []).length;
+        const count = this._files.items.length;
         const full = count >= SHELF_CAPACITY;
         const refusal = this._dropping ? this._refusal : null;
         let text;

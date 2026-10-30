@@ -133,8 +133,9 @@ This removes the extension, its programs, its service and its font, the
 voice assistant's speech recognition and its models, Isle's caches, and a
 battery charge limit Isle set (asking for your password), and takes Isle's
 hooks out of Claude Code's and Codex's settings. Your tasks,
-calendar events, clipboard history and timer settings stay in
-`~/.local/share/isle`; delete it too to remove everything.
+calendar events, clipboard history, timer settings and app usage (if you
+turned the Apps page on) stay in `~/.local/share/isle`; delete it too to
+remove everything.
 
 Remove Isle this way, not with the Extensions app's Remove button: that
 deletes only the extension, and leaves `isled`, its service and its hooks.

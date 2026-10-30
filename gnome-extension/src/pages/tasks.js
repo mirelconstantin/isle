@@ -57,6 +57,20 @@ class ReminderRow extends St.BoxLayout {
         const [, natural] = super.vfunc_get_preferred_height(forWidth);
         return [natural, natural];
     }
+
+    /** Shorter only while opening or folding: its contents keep their full height, cut below. Squeezed,
+     * St would draw the ring at that size and keep it, blurred, once the row is whole. */
+    vfunc_allocate(box) {
+        const [, natural] = super.vfunc_get_preferred_height(box.get_width());
+        if (box.get_height() >= natural) {
+            super.vfunc_allocate(box);
+            return;
+        }
+        const full = box.copy();
+        full.y2 = box.y1 + natural;
+        super.vfunc_allocate(full);
+        this.set_allocation(box);
+    }
 });
 
 // The reminder list, kept in isled's todo store.

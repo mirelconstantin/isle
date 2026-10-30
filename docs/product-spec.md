@@ -11,6 +11,7 @@ disagrees with this document is a bug in one or the other; fix both together.
 | control music without switching windows | open on hover with cover, scrubber, controls; sing along with synced lyrics |
 | keep an eye on a call while I work in another window | show calls from any app or browser: their length in the closed island, a live preview of the call, mute and a way back |
 | focus in blocks | run a Pomodoro timer that stays visible while closed and chimes at the end |
+| know where my time goes | time the app in front, if I turn it on, and show it today, over the last seven days or the last 30 |
 | not forget small tasks | write them down in one line, tick them off; tasks survive reboots and power cuts |
 | move files between apps | park files on the island and drag them out later |
 | know when something changes | show short, consistent alerts: charging, battery, losing the connection, earbuds, volume, brightness, Caps Lock |
@@ -32,13 +33,24 @@ sizes are logical pixels.
 |---|---|---|---|---|
 | Compact | 144 × P; 232 with an activity | 10 | 7 | Clock; activity slots left/right |
 | Compact, hanging | 164 × (P + 30); 256 with an activity | 16 | 10 | As above |
-| Peek (alert) | fits its content, 220–380 wide × (P + 56); 62 high off a black bar | 22 | 13 | Badge · title/subtitle · value, level bar or button, centred |
-| Expanded | 600 × (P + 164) on every page; 720 for lyrics | 32 | 22 | Header row (tabs) · page |
+| Peek (alert) | fits its content, up to 380 wide × (P + 56); 56 high off a black bar; 12 px round the badge on every side | 28 | 13 | Badge · title/subtitle (a notification's words on up to two lines) · value, level bar or button, centred |
+| Peek with buttons | fits its words up to 440, its buttons whole up to 560; buttons that don't fit go on to a line below; 16 px round one lit along its edges | 28 | 13 | Badge · title/subtitle · code · small buttons under the words, from the left |
+| Expanded | 600 × (P + 164) on every page; wider when its tabs need room; 720 for lyrics | 32 | 22 | Header row (tabs) · page |
+
+Every width is even, so the island sits centred on its display to the pixel.
 
 The top bar is slimmed to a thin bezel (status icons and the tray stay in
 it) and see-through like glass, with no colour of its own. The
 island is a black notch hanging from the top edge of the screen with concave
-shoulders. Closed, it sits inside the bar
+shoulders. Settings → Appearance → Island can make it **Glass** instead: what is
+behind it (windows and wallpaper) blurred (GNOME Shell's blur, radius 30) and
+dimmed under an 80% layer of rgba(19, 19, 21), as GNOME's menus measure with
+Blur my Shell, with a 1 px white edge at 10%; cut to the island's exact shape,
+shoulders and corners included, so nothing shows outside it. On glass,
+buttons are white at 8–16% instead of grey, an answer (Allow, Run, Join) and
+a toggle that is on take GNOME's accent colour (the user's, from GNOME 47),
+an OK stays white, and the assistant's and the alerts' light keeps to the
+edge, each colour lit by its own lightness, so it never burns to white. Closed, it sits inside the bar
 (32 px, against 26 px when it hangs below instead): maximised
 windows start below the bar, so the resting island never covers an app and
 no screen space is lost to it. Alerts and the open island reach below the
@@ -114,22 +126,21 @@ place, dimmed, so the layout never jumps.
 | Super+K (Settings: any shortcut) | Open the command surface | Close |
 | Super+Alt+V (Settings: any shortcut) | Paste the next stacked copy; with none, open the Shelf gathering | – |
 | Click a tab | – | Go to that page |
-| Two-finger swipe sideways | – | Previous / next page, one page a swipe |
-| Scroll up / down | – | Lists and lyrics scroll; elsewhere previous / next page, one a wheel click |
+| Scroll, or swipe with two fingers | – | Lists and lyrics scroll; pages change only by their tabs |
 | ← → Enter (search field) | – | Choose a clipboard card; Enter pastes it into the window in front |
 | Esc | – | Clear the search, stop typing or renaming; then close when opened with Super+V |
 
 **Default page on open**, first match wins: the page of the alert being
-shown → the page picked by hand (a tab, a swipe, or the Shelf after a file
+shown → the page picked by hand (a tab, or the Shelf after a file
 was dragged onto the island), remembered for 5 minutes and forgotten when a
 call starts → Call during a call → Notifications if some arrived unseen
 (during Do Not Disturb) → Music if something plays → Focus if the timer
 runs → Music.
 
 Pages, in order: **Call** (only during a call) **· Music · Notifications ·
-Focus · Reminders · Shelf · Calendar · Usage** (Usage only with an AI plan
-found) **· Devices**, one tab each in the header. Lists scroll with the wheel
-or touchpad and never show a scrollbar.
+Focus · Reminders · Shelf · Calendar · Devices · Apps · Usage** (Apps only with
+its switch on, Usage only with an AI plan found), one tab each in the header.
+Lists scroll with the wheel or touchpad and never show a scrollbar.
 
 **Command surface** (Super+K): the island grows into a 600 px panel with one
 field. With nothing typed it is a launcher: the pages and the actions (start
@@ -183,10 +194,11 @@ red "● 0:42" pill while the screen records (click to stop), a blue
 link and while it runs (click: join), a green "📞 1:15"
 pill during a call on any page but Call (click: the Call page), the privacy
 dots, the music bars, the assistant's sparkle, `[timer ring] Tue 20 Oct 12:26` and the gear. The
-tabs' icons, the gear and the pages' contents share the same 28 px edges. The Call tab, its
-phone in green, only shows during a call.
+tabs' icons, the gear and the pages' contents share the same 28 px edges. When the tabs and the
+status together need more than the page's width, the island grows to fit them, by the same amount on
+both sides so it stays centred. The Call tab, its phone in green, only shows during a call.
 
-**Call**, laid out like FaceTime's controls. A call is an app holding the
+**Call**, with round controls. A call is an app holding the
 microphone for over 2 s (sites open it briefly to ask for permission), in
 any app or browser: WhatsApp, Telegram, Meet, Zoom, Discord… Level meters
 and recorders (OBS, Audacity, Sound Recorder…) do not count. The app is
@@ -246,13 +258,15 @@ way to nothing (browsers report no title and "Paused" for a moment between
 videos), the song is shown playing for up to 1.5 s, so the cover, bars and
 width do not drop out and back; a song paused by itself shows at once.
 
-**Notifications**, as a plain list: a heading "Notifications" with
+**Notifications**, as cards: a heading "Notifications" with
 **Do Not Disturb** (a bell, or a moon on purple while on), a chevron beside it
-for **30 min · 1 hour · Tomorrow · Off**, and a **Clear**
-pill on its right. Below, newest first, one line each: the app's icon (a
-symbolic one on a grey tile), the title in bold and its text in grey, and
-how long ago on the right; under the pointer the row lights and its buttons
-("Reply", "Mark as read") and × take the time's place. Click a row to open
+for **30 min · 1 hour · Tomorrow · Off**, and a **Clear** pill on its right.
+Below, newest first, a card each, 6 px apart: the app's icon (a symbolic one
+on a grey tile), the title in bold and its text in grey on one line, how long
+ago on the right, and its buttons ("Reply", "Mark as read") under them, whole,
+going on to another line when they don't fit; under the pointer the card
+lights and × takes the time's place. Cards past the edge fade out as the list
+scrolls. Click a card to open
 it (the island closes). Opening the page marks them seen. Empty: a bell,
 "No notifications · You're all caught up".
 
@@ -271,11 +285,13 @@ started; the controls keep a fixed width, so nothing moves as they change.
 The page washes the island in a cool grey while focusing and a quiet green on
 a break. No glows.
 
-While a focus phase runs (paused included), Do Not Disturb is on, like a
-Focus mode; it goes off when the phase ends. Isle only undoes what it did:
-if Do Not Disturb was already on, or the user turns it off mid-session, it
-is left alone. It stays on across the lock screen, and is turned off on the
-next start if the shell stopped mid-session. ("Do Not Disturb" in Focus
+While a focus session runs (paused part way included), Do Not Disturb is on,
+like a Focus mode; it goes off when the phase ends. A focus session waiting
+for Start after a break doesn't count. Isle only undoes what it did: if Do Not
+Disturb was already on, it is left alone, and turned off mid-session it stays
+off until that session ends, past pauses and the lock screen. It stays on
+across the lock screen, and is turned off on the next start if the shell
+stopped mid-session. ("Do Not Disturb" in Focus
 Timer settings.)
 
 **Shelf** (title "Shelf"): things to keep close, in two tabs on a
@@ -304,12 +320,15 @@ segmented control (switching crossfades).
   fails stays in the stack.
 - **Files**: at most 6 files, all in view with no scrolling; a seventh is
   refused until one is removed. Each file is a tile of one size: a 52 px
-  square preview (a picture cut to a square, or the file's icon) with a
+  square preview, as Files shows the file (a picture cut to a square; a
+  document's thumbnail, such as a PDF's first page, whole, made as Files makes
+  it when there is none yet; else the theme's icon) with a
   round × always on its corner, and the name below, shortened in the
   middle. Click a tile to copy the file ("copied" shows on it): pictures
   as the image itself, so chat apps and AI chats paste an image, other
   files as a file; double-click to open it. The bar says what the tab is
-  for ("Drop files here, then drag them into any app"), how full it is ("3
+  for ("No files on the shelf · Drop files here, then drag them into any app", in the island's
+  words and the helper's alike), how full it is ("3
   of 5 · click to copy, or drag into any app"), or "Full · remove a file to
   add another". With `isle-shelf` installed, the helper draws this tab in a
   see-through window placed exactly over it, tile for tile as the island
@@ -361,14 +380,49 @@ weekends dimmer); the days, today in a red circle, the chosen day in a grey
 one, a dot under days with events. Right: the chosen day ("Today, 20
 October"; "Tomorrow", "Yesterday", or its weekday), a **Today** pill when
 away from it, a field to add an event in one line (the hint says "e.g.
-Dinner 8:00 pm"; also "Standup 9:00-9:15", "Gym at 7pm"; without a time it
-is all day), then the day's events as pills tinted in their
-calendar's colour with a bar of it down the side: title, and "All day" or
-the time on the right. Finished events recede. Events come from the
-desktop's calendars (Evolution, and accounts added in Settings → Online
-Accounts such as Google; blue; to read, not to click) and Isle's own
-(orange; × on hover to remove), kept by `isled` and forgotten after 400
-days.
+Dinner 8:00 pm"; also "Standup 9:00-9:15", "Gym at 7pm", "Dinner 1930" (four
+digits last, not a year such as 2015); without a time it is all day), then the
+day's events as grey rows with a dot of their calendar's colour: title, and
+"All day" or the time on the right ("9:00 – 10:00 AM" on a 12-hour clock). As
+a line is typed, the field shows, grey, before the chip, when it takes place as
+it will be read ("8:00 PM", "All day"; nothing for a time alone). Finished events recede. Enter clears the
+field at once and shows the event, faint, until its calendar lists it (or 30
+seconds at most), so a slow server never invites a second Enter. With the
+account's calendar out of reach (offline, its server down) the event is kept in
+Isle with a ring of that calendar's colour for its dot, the field says
+"Offline · syncs once online" a moment, and `isled` sends it there once in
+reach (then the ring gives way to the calendar's own event). Events come
+from the desktop's calendars (Evolution, and accounts added in Settings →
+Online Accounts such as Google; in each calendar's own colour; to read, not to
+click) and Isle's own (orange; × on hover to remove), kept by `isled` and
+forgotten after 400 days. New events go to an account's calendar: a chip in
+the add field (its colour, its name, ⌄) shows which; clicking it lists every
+calendar that takes events (not a subscribed one, such as holidays) in the
+field's place (the header says "New events go
+to", with Done), a row each with its account in grey, then Isle on this
+computer, a tick on the one in use. Until one is picked, the first
+account's calendar; with no account, Isle's own. The assistant adds to the
+same one. When the account can't be reached the event is kept in Isle and
+the field says "Saved in Isle instead" a moment.
+
+**Apps** (title "App Usage"): where the time went. Off until its switch in
+Settings → Pages is on; off, nothing is timed and the page has no tab. On the
+left the title, then how long the period's apps were in front ("2h 34m
+today"); on the right a segmented **Today** / **7 days** / **30 days**
+switch. Below, one row per app, most used first: its icon (a generic one for
+an app without a desktop file), name, a thin white bar against the most used
+app, and its time ("1h 12m", or "<1m" under a minute). Empty: "No usage yet
+· Time in the app in front shows up here". Only the application in front is
+timed, whether or not there is keyboard or pointer input; it stops when focus
+moves to another application, when no window is in front, when the screen
+locks, and after five minutes without input, unless a video or another
+program holds the session awake; the next input goes on timing. The
+extension keeps the stretches and sends them to `isled` at most once a
+minute, as the page opens, and when timing stops; nothing is asked while
+the page is closed. A stretch past local midnight counts for each day it
+spans. `isled` keeps 30 days in `~/.local/share/isle/app-usage.json`, and
+only GNOME Shell may report, read or clear them. Settings → App Usage
+clears them.
 
 **Devices**, the Bluetooth devices connected now, one row
 each: the device's icon, its name, and the battery it reports ("85%", red at
@@ -383,9 +437,10 @@ One at a time. *Instant* alerts replace whatever is showing; the rest queue
 open or hidden by a fullscreen window. Volume, brightness and Caps Lock are
 dropped instead of waiting, since they are stale by then. More than three
 notifications waiting come as one ("6 new notifications"); a notification
-only counts as seen once it was on screen. Reminders and critical
-notifications are *sticky*: their time only runs while someone is at the
-computer. Right-clicking an alert puts it away without opening it.
+only counts as seen once it was on screen with someone at the computer.
+Reminders and critical notifications are *sticky*: their time only runs while
+someone is at the computer; any notification waits for them so too, as GNOME's
+banner does. Right-clicking an alert puts it away without opening it.
 
 | Alert | Badge | Title / subtitle | Right | Time |
 |---|---|---|---|---|
@@ -394,7 +449,7 @@ computer. Right-clicking an alert puts it away without opening it.
 | Low battery (20, 10, 5%) | red ring | Low Battery / Plug in your charger soon | 10% | 8 s |
 | Fully charged | green ring | Fully Charged | 100% | 2.6 s |
 | Earbuds connected | ring + device icon | AirBuds Pro / Connected | 70% | 2.6 s |
-| Connection lost | Wi-Fi offline icon | Offline / The network connection was lost | – | 2.6 s |
+| Connection lost | Wi-Fi offline icon | Offline / The network connection was lost | – | 2.6 s; taken back once online again |
 | Volume, brightness (instant) | icon | Volume / device | level bar + %, gliding to each new level; pressing on at 0% or 100% stretches the island like a rubber band | 1.5 s |
 | Caps Lock (instant) | ⇪ | Caps Lock on / off | – | 1.5 s |
 | New song (off by default) | cover | title / artist | – | 2.6 s |
@@ -416,6 +471,15 @@ battery or failure, the plan's own colour, blue for an event); nothing amber.
 Join is the one blue button, marking the action to take. Buttons on alerts,
 notifications and the assistant are translucent grey pills with white text,
 lighter under the pointer.
+
+While the event alert is on, GNOME's own calendar reminder (Evolution's
+`org.gnome.Evolution-alarm-notify`, which opens a window of its own when
+clicked) of an event Isle alerts of is taken away as it comes: one reminder
+per event, Isle's. It is matched by its calendar and event ids, for an event
+with a time from 15 minutes gone to 30 minutes before Isle's own alert.
+Reminders Isle doesn't give stay GNOME's: an all-day event, a task, one an
+hour or a day ahead, a calendar GNOME doesn't show, and any while Do Not
+Disturb is on (Isle alerts of nothing then).
 
 When a window is fullscreen the island hides, alerts wait (see above) and
 GNOME's own volume pop-up is used. Charging, network, Bluetooth and Caps

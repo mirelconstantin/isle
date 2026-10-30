@@ -299,6 +299,9 @@ export const TimerPage = GObject.registerClass({
         if (this._stats.text !== text)
             this._stats.text = text;
 
+        // Sized only on screen: a widget not in the stage has no theme node to measure, and St says so.
+        if (!this.active)
+            return;
         const byDate = new Map((state.history ?? []).map(day => [day.date, day.focus_ms]));
         const today = new Date();
         const days = [];

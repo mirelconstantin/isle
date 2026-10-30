@@ -11,18 +11,10 @@ use std::time::{Duration, Instant};
 use log::debug;
 use zbus::Connection;
 
-/// Each calendar service EDS has had, newest first.
-const FACTORIES: [&str; 2] = [
-    "org.gnome.evolution.dataserver.Calendar8",
-    "org.gnome.evolution.dataserver.Calendar7",
-];
-const FACTORY_PATH: &str = "/org/gnome/evolution/dataserver/CalendarFactory";
-const FACTORY: &str = "org.gnome.evolution.dataserver.CalendarFactory";
-const CALENDAR: &str = "org.gnome.evolution.dataserver.Calendar";
+use crate::eds::{CALENDAR, close_calendar, open_calendar, timed};
+
 /// The properties a link is looked for in, in this order.
 const PROPERTIES: [&str; 4] = ["X-GOOGLE-CONFERENCE", "URL", "LOCATION", "DESCRIPTION"];
-/// Each step of a lookup (opening a calendar can reach its server) gives up after this.
-const TIMEOUT: Duration = Duration::from_secs(5);
 const KEEP: Duration = Duration::from_secs(6 * 60 * 60);
 const CACHED: usize = 256;
 
@@ -83,13 +75,6 @@ impl MeetingLinks {
     }
 }
 
-/// `step`, or an error once it has taken `TIMEOUT`.
-async fn timed<T>(step: impl Future<Output = zbus::Result<T>>) -> zbus::Result<T> {
-    tokio::time::timeout(TIMEOUT, step)
-        .await
-        .unwrap_or_else(|_| Err(zbus::Error::Failure("timed out".into())))
-}
-
 /// The event's iCalendar text, from the calendar `source` in EDS.
 async fn read_event(bus: &Connection, source: &str, event: &str) -> zbus::Result<String> {
     let (path, name) = timed(open_calendar(bus, source)).await?;
@@ -103,36 +88,8 @@ async fn read_event(bus: &Connection, source: &str, event: &str) -> zbus::Result
             .deserialize::<String>()
     })
     .await;
-    // Lets go of isled's hold on the calendar however reading it went; GNOME Shell keeps its own.
-    if let Err(err) = timed(bus.call_method(Some(name), path, Some(CALENDAR), "Close", &())).await {
-        debug!("could not close calendar {source}: {err}");
-    }
+    close_calendar(bus, path, name, source).await;
     ical
-}
-
-/// Opens the calendar `source` for isled: its object path and bus name.
-async fn open_calendar(bus: &Connection, source: &str) -> zbus::Result<(String, String)> {
-    let mut opened = None;
-    let mut failure = None;
-    for factory in FACTORIES {
-        match bus
-            .call_method(
-                Some(factory),
-                FACTORY_PATH,
-                Some(FACTORY),
-                "OpenCalendar",
-                &(source,),
-            )
-            .await
-        {
-            Ok(reply) => {
-                opened = Some(reply.body().deserialize::<(String, String)>()?);
-                break;
-            }
-            Err(err) => failure = Some(err),
-        }
-    }
-    opened.ok_or_else(|| failure.unwrap_or(zbus::Error::Unsupported))
 }
 
 /// The first meeting link in an event's iCalendar text, looked for property by property.

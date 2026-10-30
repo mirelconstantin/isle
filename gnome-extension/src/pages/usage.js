@@ -21,7 +21,7 @@ const MARKS = {warn: 80, critical: 95};
 /** Each provider's colour, for its bars. */
 const ACCENTS = {claude: [0.85, 0.47, 0.34], codex: [0.06, 0.64, 0.5], grok: [0.93, 0.94, 0.96]};
 const FALLBACK = Palette.BLUE;
-/** How far a scroll goes before it moves to the next provider, as the island's tabs do. */
+/** How far a scroll goes before it moves to the next provider. */
 const WHEEL_STEP = 1;
 const SWIPE_STEP = 1.5;
 const GESTURE_GAP_MS = 180;
@@ -212,7 +212,7 @@ class UsagePage extends Page {
         this._fill();
     }
 
-    // Up and down move between providers, one a swipe or a wheel click; with one, the island flips tabs.
+    // Up and down move between providers, one a swipe or a wheel click.
     _onScroll(event) {
         const count = this._providers().length;
         if (count < 2)
@@ -247,7 +247,7 @@ class UsagePage extends Page {
             break;
         }
         default:
-            // Sideways is the island's, to flip tabs.
+            // Sideways moves nothing here.
             return Clutter.EVENT_PROPAGATE;
         }
         if (step)

@@ -101,7 +101,8 @@ fn request(ai: &str, payload: &Value) -> Option<Request> {
         session: text("session_id").into(),
         tool: text("tool_name").into(),
         input: line,
-        always: !rule_suggestions(payload).is_empty(),
+        // Codex keeps no rule from its hook's answer: Always would only allow it this once.
+        always: matches!(ai, "claude" | "grok") && !rule_suggestions(payload).is_empty(),
         ..Request::default()
     })
 }
@@ -679,6 +680,13 @@ mod tests {
         let asked = request("codex", &edit).unwrap();
         assert!(!asked.always && asked.input == "*** Begin Patch");
         assert!(request("agy", &edit).is_none());
+        // Always only where the AI keeps the rule: Codex with suggestions, Grok running Claude's hooks.
+        assert!(!request("codex", &claude).unwrap().always);
+        assert!(request("grok", &claude).unwrap().always);
+        // The command stays as it runs, its spaces too.
+        let mut spaced = claude.clone();
+        spaced["tool_input"]["command"] = json!("grep \"a  b\" f");
+        assert_eq!(request("claude", &spaced).unwrap().input, "grep \"a  b\" f");
     }
 
     #[test]

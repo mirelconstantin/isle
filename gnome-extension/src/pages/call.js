@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 zickrian
 
-// The call going on, with FaceTime-like controls: a live preview of the call's window (you and
+// The call going on, with round controls: a live preview of the call's window (you and
 // whoever you call), its app and duration, mute, and a way back. It only has a tab during a call.
 
 import Cairo from 'cairo';
@@ -13,6 +13,7 @@ import St from 'gi://St';
 
 import {VERTICAL, onUiScale, px, uiScale} from '../compat.js';
 import * as Format from '../format.js';
+import * as Theme from '../theme.js';
 import {icon, label, setEnabled} from '../widgets.js';
 import {Page} from './page.js';
 
@@ -68,7 +69,7 @@ class WindowPreview extends St.Widget {
         this._hint = label('', 'isle-call-hint', {x_align: Clutter.ActorAlign.CENTER});
         this._placeholder.add_child(this._appIcon);
         this._placeholder.add_child(this._hint);
-        // Rounds the corners by painting them in the island's black, with a hairline edge.
+        // Rounds the corners by painting them in the island's colour, with a hairline edge.
         this._corners = new St.DrawingArea({x_expand: true, y_expand: true});
         this._corners.connect('repaint', area => this._repaintCorners(area));
         this._hover = new St.Bin({
@@ -164,7 +165,7 @@ class WindowPreview extends St.Widget {
         this.width = px(width);
     }
 
-    /** Black outside the rounded shape, then a faint white edge. */
+    /** The island's colour outside the rounded shape, then a faint white edge. */
     _repaintCorners(area) {
         const cr = area.get_context();
         const [width, height] = area.get_surface_size();
@@ -173,7 +174,7 @@ class WindowPreview extends St.Widget {
         cr.rectangle(0, 0, width, height);
         roundedRect(cr, 0, 0, width, height, radius);
         cr.setFillRule(Cairo.FillRule.EVEN_ODD);
-        cr.setSourceRGBA(0, 0, 0, 1);
+        cr.setSourceRGBA(...Theme.solid(), 1);
         cr.fill();
         roundedRect(cr, edge, edge, width - 2 * edge, height - 2 * edge, radius - edge);
         cr.setSourceRGBA(1, 1, 1, 0.1);
@@ -256,7 +257,7 @@ class CallPage extends Page {
         return this._call.active;
     }
 
-    /** A round button with its caption below, like FaceTime's. */
+    /** A round button with its caption below. */
     _control(iconName, caption, onClick) {
         const button = new St.Button({
             style_class: 'isle-call-control',

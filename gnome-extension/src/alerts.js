@@ -8,6 +8,8 @@ import GLib from 'gi://GLib';
 import * as Format from './format.js';
 import * as Playback from './playback.js';
 import {notificationIcon, plainBody} from './notifications.js';
+import * as Theme from './theme.js';
+import {hasOwnIcon} from './widgets.js';
 
 const OSD_DURATION = 1500;
 const STATUS_DURATION = 2600;
@@ -15,6 +17,8 @@ const REMINDER_DURATION = 8000;
 /** As long as GNOME's own banner; a passing one (a screenshot taken) less. The pointer on it holds it. */
 const NOTIFICATION_DURATION = 4000;
 const TRANSIENT_NOTIFICATION_DURATION = 2500;
+/** Buttons that turn something down, never shown as the one to press. */
+const DECLINING = /^(decline|reject|deny|dismiss|cancel|ignore|hang up|end call|not now|tolak|abaikan|batal|tutup)\b/i;
 /** As many of a notification's buttons as GNOME's banner shows. */
 const MAX_NOTIFICATION_BUTTONS = 3;
 /** The longest an answer stays to be read, as the open island gives it (see VOICE_READ_MS in controller.js). */
@@ -159,7 +163,8 @@ export function system(event) {
         const battery = event.connected ? device.battery ?? null : null;
         return {
             key: `bluetooth:${device.path}`,
-            icon: device.icon.endsWith('-symbolic') ? device.icon : `${device.icon}-symbolic`,
+            // A kind Isle has no icon of its own for (a printer, a watch): Bluetooth's, in Isle's style.
+            icon: hasOwnIcon(device.icon) ? device.icon : 'isle-bluetooth-symbolic',
             ring: battery !== null ? battery / 100 : null,
             title: device.name,
             subtitle: event.connected ? 'Connected' : 'Disconnected',
@@ -260,9 +265,9 @@ function bannersOn(item) {
     return item.source?.policy?.showBanners ?? true;
 }
 
-/** A GNOME notification, shown in place of GNOME's own banner; `onShown` once it is on screen, `onWithdrawn(key)`
- * once its app takes it back. While the screen is `shared`, only who it is from shows. */
-export function notification(item, urgent, {onShown, onWithdrawn}, shared = false) {
+/** A GNOME notification, in place of GNOME's own banner; `onShown` once on screen, `onSeen` once someone is there to
+ * see it, `onWithdrawn(key)` once its app takes it back. While the screen is `shared`, only who it is from shows. */
+export function notification(item, urgent, {onShown, onSeen, onWithdrawn}, shared = false) {
     if (!numbers.has(item))
         numbers.set(item, ++lastNumber);
     const key = `notification:${numbers.get(item)}`;
@@ -274,6 +279,9 @@ export function notification(item, urgent, {onShown, onWithdrawn}, shared = fals
     const title = (shared ? item.source?.title || 'New notification' : item.title || item.source?.title || '')
         .replace(/\s+/g, ' ').trim();
     const buttons = shared ? [] : (item.actions ?? []).slice(0, MAX_NOTIFICATION_BUTTONS);
+    // The last, as GNOME's banner has it, unless it turns something down ("Decline"): then the last that doesn't.
+    const turnsDown = button => DECLINING.test(button.label ?? '');
+    const mainButton = buttons.findLastIndex(button => !turnsDown(button));
     const press = button => {
         if (!withdrawn.has(item))
             button.activate();
@@ -284,25 +292,32 @@ export function notification(item, urgent, {onShown, onWithdrawn}, shared = fals
         kind: 'notification',
         // Put away with its ×, buttons or not, as GNOME's banner.
         closable: true,
-        // A critical one waits for someone to be there, like GNOME's, which stays until handled.
+        // A critical one keeps its whole time, like GNOME's, which stays until handled. Every one waits for
+        // someone to be there (see `waitsWhileAway` in controller.js).
         sticky: urgent,
         // One button ("Mark as read") beside the words; two or three ("Decline", "Accept") under them, all of
         // them, as GNOME's banner has them.
         action: buttons.length === 1 ? {label: buttons[0].label, callback: () => press(buttons[0])} : undefined,
         actions: buttons.length > 1 ? buttons.map((button, index) => ({
             label: button.label,
-            primary: index === buttons.length - 1,
+            primary: index === mainButton,
             callback: () => press(button),
         })) : undefined,
         onShown: () => {
             if (!withdrawn.has(item))
                 onShown();
         },
+        onSeen: () => {
+            if (!withdrawn.has(item))
+                onSeen();
+        },
         appIcon: true,
         gicon: notificationIcon(item),
         icon: 'dialog-information-symbolic',
         title,
         subtitle: body,
+        // Its words on up to two lines before they are cut.
+        subtitleLines: 2,
         // A critical one stands out in red.
         tone: urgent ? 'bad' : 'neutral',
         priority: urgent ? 'instant' : undefined,
@@ -319,7 +334,7 @@ export function notification(item, urgent, {onShown, onWithdrawn}, shared = fals
             // Do Not Disturb turned on while it waited: it stays unread in the list, never popping up.
             if (withdrawn.has(item) || (!alert.shown && (item.acknowledged || (!urgent && !bannersOn(item)))))
                 return null;
-            const redone = notification(item, urgent, {onShown, onWithdrawn}, sharedNow);
+            const redone = notification(item, urgent, {onShown, onSeen, onWithdrawn}, sharedNow);
             const labels = a => [a.action, ...a.actions ?? []].map(button => button?.label).join();
             if (redone.title === alert.title && redone.subtitle === alert.subtitle &&
                 labels(redone) === labels(alert) && redone.gicon === alert.gicon)
@@ -398,8 +413,9 @@ function meetingService(link) {
     return null;
 }
 
-/** An event starts soon ({title, start_ms, end_ms} from the Calendar page); with a meeting `link`, Join opens it. */
-export function meeting(event, link, join) {
+/** An event starts soon ({title, start_ms, end_ms} from the Calendar page); with a meeting `link`, Join opens it.
+ * `onShown` once it is on screen. */
+export function meeting(event, link, join, onShown) {
     const start = new Date(event.start_ms);
     const minutes = Math.max(0, Math.round((event.start_ms - Date.now()) / 60000));
     const at = date => Format.timeOfDay(GLib.DateTime.new_from_unix_local(Math.floor(date.getTime() / 1000)));
@@ -416,11 +432,12 @@ export function meeting(event, link, join) {
         // Its time only runs while someone is there to see it, as a reminder's.
         sticky: true,
         action: link ? {label: 'Join', callback: join, primary: true} : null,
+        onShown,
         // When its turn comes: the minutes left then, and gone once the event is over (an hour without an end).
         fresh: () => {
             if (Date.now() >= (event.end_ms || event.start_ms + 3600e3))
                 return null;
-            const redone = meeting(event, link, join);
+            const redone = meeting(event, link, join, onShown);
             if (redone.title === alert.title)
                 return alert;
             redone.shown = alert.shown;
@@ -462,6 +479,9 @@ export function agent(event, show) {
 /** The light round an alert that asks (amber), and one that tells an agent is done (green). */
 const ASKING_GLOW = [[1, 0.62, 0.04], [1, 0.42, 0.25], [1, 0.8, 0.3]];
 const DONE_GLOW = [[0.19, 0.82, 0.35], [0.35, 0.88, 0.75], [0.7, 0.94, 0.35]];
+/** On glass, each runs one way as Classic does, deep to light: orange to gold, green to teal. */
+const GLASS_ASKING_GLOW = [[0.99, 0.48, 0.06], [0.93, 0.62, 0.07], [0.86, 0.75, 0.33]];
+const GLASS_DONE_GLOW = [[0.21, 0.64, 0.05], [0.07, 0.72, 0.45], [0.31, 0.86, 0.74]];
 
 /** What a tool call asks to do, on one line: a shell command as it is, else the tool and what it touches
  * (isled sends that as a line; see agents/hook.rs `request`). */
@@ -476,13 +496,12 @@ function toolLine(tool, input) {
 /** An AI agent asks to run something ({provider, project, tool, input, always}), shown by the assistant;
  * `answer(choice)` sends allow, deny or always back. */
 export function agentAsks(request, look, answer) {
+    // Allow is the one to press; Always (Claude keeps a rule for next time) is offered, never pressed for you.
     const actions = [
         {label: 'Deny', answer: 'deny', callback: () => answer('deny')},
-        {label: 'Allow', answer: 'allow', primary: !request.always, callback: () => answer('allow')},
+        ...request.always ? [{label: 'Always', answer: 'allow', done: 'Always allowed here', callback: () => answer('always')}] : [],
+        {label: 'Allow', answer: 'allow', primary: true, callback: () => answer('allow')},
     ];
-    // Claude can keep a rule for next time; the alert says where it is kept.
-    if (request.always)
-        actions.push({label: 'Always', answer: 'allow', primary: true, done: 'Always allowed here', callback: () => answer('always')});
     return {
         key: `agent-ask:${request.id}`,
         bot: {look, glyph: '!'},
@@ -490,7 +509,7 @@ export function agentAsks(request, look, answer) {
         subtitle: request.project ? AGENT_APPS[request.provider] : '',
         code: toolLine(request.tool, request.input),
         tone: 'warn',
-        glow: ASKING_GLOW,
+        glow: Theme.theme() === 'glass' ? GLASS_ASKING_GLOW : ASKING_GLOW,
         actions,
         // It waits on the user: it stays until answered, or until the agent stops asking.
         sticky: true,
@@ -509,7 +528,7 @@ export function agentDone(event, look, show) {
         titleLines: 2,
         subtitle: `${[event.project, AGENT_APPS[event.provider]].filter(Boolean).join(' · ')} finished`,
         tone: 'good',
-        glow: DONE_GLOW,
+        glow: Theme.theme() === 'glass' ? GLASS_DONE_GLOW : DONE_GLOW,
         actions: [
             ...show ? [{label: 'Open terminal', callback: show}] : [],
             {label: 'OK', primary: true, callback: () => {}},
@@ -561,7 +580,7 @@ export function agentConnected(provider, look, settings) {
         key: `agent-connected:${provider}`,
         bot: {look, glyph: 'check', form: 'success'},
         title: `${AGENT_APPS[provider]} is connected`,
-        subtitle: provider === 'codex' ? 'Trust Isle’s hook once in Codex: /hooks' : 'Answer it from here when it asks',
+        subtitle: provider === 'codex' ? 'In Codex, type /hooks once and allow Isle' : 'Answer it from here when it asks',
         tone: 'good',
         actions: [
             {label: 'Settings', callback: settings},

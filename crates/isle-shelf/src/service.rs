@@ -66,6 +66,9 @@ const INTERFACE: &str = r#"
     <signal name="Hovering">
       <arg name="uris" type="as"/>
     </signal>
+    <!-- 1.5: the window has drawn its first frame since it was shown, so the extension fades in
+         something drawn, never an empty (black) window. -->
+    <signal name="Drawn"/>
   </interface>
 </node>"#;
 
@@ -150,6 +153,11 @@ pub fn announce_dragging(active: bool) {
 /// Tells the extension which files are dragged over the window (none once they leave).
 pub fn announce_hovering(uris: &[String]) {
     announce("Hovering", &(uris,).to_variant());
+}
+
+/// Tells the extension the window has drawn since it was shown.
+pub fn announce_drawn() {
+    announce("Drawn", &().to_variant());
 }
 
 /// Emits one of the interface's signals; a failure is only logged.

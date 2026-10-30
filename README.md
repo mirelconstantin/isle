@@ -5,8 +5,8 @@
 **A notch-style island for the GNOME desktop.**
 
 Music with synced lyrics, calls, notifications, a focus timer, reminders, a
-calendar that tells you when to join a meeting, a clipboard shelf, Claude
-Code and Codex asking you right there, and an assistant that installs and
+calendar that tells you when to join a meeting, a clipboard shelf, app usage,
+Claude Code and Codex asking you right there, and an assistant that installs and
 fixes things with the AI you already use, living in a notch at the top of
 your screen.
 
@@ -62,7 +62,7 @@ appear in the same place instead of in the middle of the screen.
 </tr>
 <tr>
 <td width="50%" valign="top">
-<img src="docs/images/call.png" alt="A Google Meet call in the island: a live preview of the call, its length, mute and open" width="100%"><br>
+<img src="docs/images/call.png" alt="A Google Meet call in the island: its length, mute and open" width="100%"><br>
 <b>Calls</b> in WhatsApp, Telegram, Meet or any app or browser: the closed island shows a green phone and how long the call has lasted. Open it to see the call live (you and whoever you call) while you work in other windows, mute your microphone, or jump back to the call.
 </td>
 <td width="50%" valign="top">
@@ -72,7 +72,7 @@ appear in the same place instead of in the middle of the screen.
 </tr>
 <tr>
 <td width="50%" valign="top">
-<img src="docs/images/reminders.png" alt="Reminders page: a list with a long reminder wrapped over two lines" width="100%"><br>
+<img src="docs/images/reminders.png" alt="Reminders page: four reminders, one of them long" width="100%"><br>
 <b>Reminders</b>, a plain list: add, rename in place, tick one off and it is struck through, then goes. A long one wraps over as many lines as it needs.
 </td>
 <td width="50%" valign="top">
@@ -82,7 +82,7 @@ appear in the same place instead of in the middle of the screen.
 </tr>
 <tr>
 <td width="50%" valign="top">
-<img src="docs/images/files.png" alt="The files tray with a photo, a PDF and a text file" width="100%"><br>
+<img src="docs/images/files.png" alt="The files tray with three pictures and a PDF" width="100%"><br>
 <b>Files tray.</b> Files dropped on the island wait here, with their thumbnails, until you drag them into an app or click one to copy it.
 </td>
 <td width="50%" valign="top">
@@ -96,7 +96,7 @@ appear in the same place instead of in the middle of the screen.
 <b>Notifications.</b> GNOME's notifications collect here as a plain list, newest first, with their buttons ("Reply", "Mark as read") under the pointer, Clear, and Do Not Disturb a click away.
 </td>
 <td width="50%" valign="top">
-<img src="docs/images/voice.png" alt="The voice assistant working through a request in steps: finding Spotify, opening it, playing jazz, setting the volume" width="100%"><br>
+<img src="docs/images/voice.png" alt="The voice assistant at work: what it heard, and the step it is on, finding jazz on Spotify" width="100%"><br>
 <b>Voice assistant.</b> Press Super+I and ask, in English or Indonesian: play a song, find a file, put windows side by side, add a reminder, explain why the laptop is slow. It works as an agent: a request with several steps is done one after another, each step checked, with the AI you already use (Claude Code, Codex, Grok or Antigravity).
 </td>
 </tr>
@@ -106,7 +106,7 @@ appear in the same place instead of in the middle of the screen.
 <b>Installs and fixes things.</b> "Install LibreOffice", "pasang codex": it checks what your Linux has, searches the web when unsure, and shows the one command it wants to run, with what to know (your password, a script from the web, removing files). Press <b>Run</b> or <b>Deny</b>. It runs in the background while you carry on, and the assistant checks it worked before saying so.
 </td>
 <td width="50%" valign="top">
-<img src="docs/images/conversation.png" alt="The conversation: install vlc, the command that ran with Done, and the answer, with + and the field to type in" width="100%"><br>
+<img src="docs/images/conversation.png" alt="The conversation: install vlc, the command that ran with its time, and the answer" width="100%"><br>
 <b>Speak or type, and talk it through.</b> It listens as soon as it opens; start typing to type instead. Scroll up for the conversation so far; select text to copy it, + for a new one. The bot turns to the pointer, blinks, bounces with your voice and changes expression as it thinks and answers, and the light round the edge rises as you speak. Close the island and it carries on in the background.
 </td>
 </tr>
@@ -123,11 +123,21 @@ appear in the same place instead of in the middle of the screen.
 <tr>
 <td width="50%" valign="top">
 <img src="docs/images/alerts.png" alt="The closed island with a song and the focus timer, then alerts for a meeting with Join, Claude Code asking to run a command, a notification with Reply, and charging" width="100%"><br>
-<b>Alerts</b> for volume, brightness, Caps Lock, charging, low battery, Bluetooth devices with their battery, going offline, reminders, meetings about to start, AI plan limits and GNOME notifications with their buttons, in the same place instead of the middle of the screen. Hold the pointer on one to keep it, with a × on its icon to put it away (or swipe up). Icons drawn in SF Symbols' manner move once as they appear: the bolt pulses, the bell sways, rings sweep and count up.
+<b>Alerts</b> for volume, brightness, Caps Lock, charging, low battery, Bluetooth devices with their battery, going offline, reminders, meetings about to start, AI plan limits and GNOME notifications with their buttons, in the same place instead of the middle of the screen. Hold the pointer on one to keep it, with a × on its icon to put it away (or swipe up). Isle's own icons move once as they appear: the bolt pulses, the bell sways, rings sweep and count up.
 </td>
 <td width="50%" valign="top">
 <img src="docs/images/approvals.png" alt="Claude Code asking to run npm run build, with Deny, Allow and Always; then Allowed" width="100%"><br>
 <b>AI agents.</b> When Claude Code or Codex asks permission to run something, answer from the island: <b>Deny</b>, <b>Allow</b> or, for Claude Code, <b>Always</b>. When one is done, the island says what it did. Nothing shows while you are in its window, and answering in its terminal works as before.
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/images/apps.png" alt="Apps page: Brave Web Browser, Visual Studio Code, Ghostty and Discord with their times today" width="100%"><br>
+<b>App usage.</b> Where your time goes: the application in front today, over the last seven days, or the last 30, with its icon, a bar and its time. Off until you turn it on, it times the app in front even when you are not typing or clicking; five idle minutes pause it unless a video holds the session awake, and locking the screen stops it. Kept on this computer for 30 days.
+</td>
+<td width="50%" valign="top">
+<img src="docs/images/glass.png" alt="The music page in the glass island, the wallpaper behind it showing through, blurred" width="100%"><br>
+<b>Glass.</b> The island in dark glass instead of black, if you prefer: what is behind it shows through, blurred, as you work. Choose it in Settings → Island → Appearance.
 </td>
 </tr>
 </table>
@@ -250,7 +260,7 @@ cd isle
 | Do this | To |
 |---|---|
 | Rest the pointer on the notch | Open the island (or click it, if Settings say so) |
-| Click a tab, or swipe sideways with two fingers | Switch pages |
+| Click a tab | Switch pages |
 | Move the pointer away, or press Esc | Close it |
 | Click the notch | Open it now; on an alert, open what it is about |
 | Middle-click the notch | Play or pause |
@@ -280,9 +290,10 @@ stops, a warning shows in the closed island; click it to start it again.
 Click the gear right of the clock in the open island (or Isle's gear in the
 **Extensions** app):
 
-- **Island:** the top bar on a slider from glass (default) to black, the
-  island itself always black; which pages the open island has (Music,
-  Notifications, Focus, Reminders, Shelf, Calendar, Devices, AI Usage) and whether it
+- **Island:** Isle's own black island, or Glass: dark glass that shows what
+  is behind it (windows and wallpaper) blurred, as GNOME's menus look with
+  Blur my Shell; the top bar on a slider from glass (default) to black; which pages the open island has (Music,
+  Notifications, Focus, Reminders, Shelf, Calendar, Devices, Apps, AI Usage) and whether it
   has the AI assistant at all; world clocks, and their cities;
   the closed island inside the bar or hanging below it; with more than one
   display, on the main one or the one you are using; opening when the
@@ -388,7 +399,7 @@ after 10 minutes, and a command is stopped after 30.
    `isle-setup-voice --remove-old`.
 3. Pick the AI in **Settings → Assistant**, or leave it on Automatic, which
    uses the first one you are signed in to: Claude Code, then Codex, then
-   Antigravity. An AI installed later is found by itself.
+   Grok, then Antigravity. An AI installed later is found by itself.
 4. Check with `~/.local/bin/isled --doctor` (`isled --doctor` with a
    package): it lists speech recognition (the models
    downloaded, and the GPU or processor it runs on) and each AI, where it is
@@ -514,10 +525,11 @@ camera or the microphone itself.
 ## Data & network
 
 Isle has no server and no telemetry; your clipboard history, reminders,
-events, timer and the assistant's chats stay in `~/.local/share/isle`, and
-speech is recognised on this computer. It goes online only for synced lyrics
-([LRCLIB](https://lrclib.net)) and cover art, once per song (lyrics can be
-turned off in Settings); your Claude plan's usage (`api.anthropic.com`, with
+events, timer, app usage and the assistant's chats stay in
+`~/.local/share/isle`, and speech is recognised on this computer. It goes
+online only for synced lyrics ([LRCLIB](https://lrclib.net)) and cover art,
+once per song (lyrics can be turned off in Settings); your Claude plan's
+usage (`api.anthropic.com`, with
 Claude Code's own sign-in); a look for a newer Isle on GitHub at most once a
 day (also in Settings); the speech model, downloaded once from Hugging Face
 when you set up voice; and the voice assistant, whose requests go to the AI
@@ -619,6 +631,16 @@ and [CHANGELOG.md](CHANGELOG.md) for what changed. Everyone taking part
 follows the [Code of Conduct](CODE_OF_CONDUCT.md); please report security
 problems privately as described in [SECURITY.md](SECURITY.md).
 
+### Contributors
+
+Thanks to everyone who has made Isle better:
+
+- [@caffeinepx](https://github.com/caffeinepx): Grok in the voice assistant
+  and on the AI usage page; music from Zen and Firefox that keeps its place;
+  a sun or a moon by each World Clock.
+- [@Ashishranjan980](https://github.com/Ashishranjan980): the Apps page, where
+  your time in each app goes.
+
 ## Support
 
 Isle is free and always will be. If it makes your desktop nicer, you can
@@ -644,7 +666,9 @@ come from [Simple Icons](https://simpleicons.org) (CC0); they are trademarks of
 Anthropic and OpenAI, shown only to name their plans. The assistant's face
 takes its expressions from [bloub](https://github.com/jeremy-prt/bloub) by
 Jérémy Perret, under the MIT License
-([notice](gnome-extension/NOTICE-bloub.txt)).
+([notice](gnome-extension/NOTICE-bloub.txt)). The calendar icon takes its shape
+from [Lucide](https://lucide.dev)'s "calendar-days", under the ISC License
+([notice](gnome-extension/NOTICE-lucide.txt)).
 
 The demo video shows "Clouds" by Tibor Mokanszki from the Ubuntu 24.04
 wallpapers, under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/);

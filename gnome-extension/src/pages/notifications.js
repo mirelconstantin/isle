@@ -10,10 +10,10 @@ import GObject from 'gi://GObject';
 import Pango from 'gi://Pango';
 import St from 'gi://St';
 
-import {VERTICAL} from '../compat.js';
+import {VERTICAL, px} from '../compat.js';
 import * as Format from '../format.js';
 import {notificationIcon, plainBody} from '../notifications.js';
-import {icon, iconButton, isSymbolic, label, ownIcon, pillButton, setButtonIcon} from '../widgets.js';
+import {WrapLayout, icon, iconButton, isSymbolic, label, ownIcon, pillButton, setButtonIcon} from '../widgets.js';
 import {Page} from './page.js';
 
 /** A card offers at most this many of its notification's buttons ("Mark as read", "Accept"). */
@@ -219,10 +219,11 @@ class NotificationsPage extends Page {
         this.emit('tint-changed');
     }
 
-    /** A row: the app's icon, who and what on one line, and when; under the pointer, its buttons and ×. */
+    /** A row: the app's icon, who and what on one line, its buttons under them, and when; × under the pointer. */
     _row(notification) {
         const content = new St.BoxLayout({style_class: 'isle-notification', x_expand: true});
-        content.add_child(notificationBadge(notificationIcon(notification)));
+        const badge = notificationBadge(notificationIcon(notification));
+        content.add_child(badge);
 
         const line = new St.BoxLayout({style_class: 'isle-notification-line', x_expand: true, y_align: Clutter.ActorAlign.CENTER});
         // On one line, as the body: a title may hold line breaks too.
@@ -235,22 +236,33 @@ class NotificationsPage extends Page {
         body.visible = body.text.length > 0;
         line.add_child(title);
         line.add_child(body);
-        content.add_child(line);
+        const texts = new St.BoxLayout({...VERTICAL, x_expand: true, y_align: Clutter.ActorAlign.CENTER});
+        texts.add_child(line);
+        content.add_child(texts);
+        // Its buttons, as GNOME's banner had them, on a line of their own; not while the screen is shared.
+        const actions = this._sharing ? [] : (notification.actions ?? []).slice(0, MAX_ACTIONS);
+        if (actions.length) {
+            // Whole, never cut: those that don't fit go on to a line below.
+            const buttons = new St.Widget({style_class: 'isle-notification-actions', x_expand: true,
+                layout_manager: new WrapLayout(px(6))});
+            for (const action of actions) {
+                buttons.add_child(pillButton(action.label, 'isle-pill-small isle-notification-action', () => {
+                    action.activate();
+                    this.emit('request-close');
+                }));
+            }
+            texts.add_child(buttons);
+            // From the top, the icon and the time level with its first line.
+            badge.y_align = texts.y_align = Clutter.ActorAlign.START;
+        }
 
-        // The time, and in its place under the pointer the buttons and ×.
-        const corner = new St.Widget({layout_manager: new Clutter.BinLayout(), y_align: Clutter.ActorAlign.CENTER});
+        // The time, and in its place under the pointer the ×.
+        const corner = new St.Widget({layout_manager: new Clutter.BinLayout(),
+            y_align: actions.length ? Clutter.ActorAlign.START : Clutter.ActorAlign.CENTER});
         const time = label(Format.ago(notification.datetime), 'isle-notification-time', {x_align: Clutter.ActorAlign.END});
         this._times.push([time, notification.datetime]);
         corner.add_child(time);
         const tools = new St.BoxLayout({style_class: 'isle-notification-tools', x_align: Clutter.ActorAlign.END, opacity: 0, visible: false});
-        // Its buttons, as GNOME's banner had them; not while the screen is shared.
-        const actions = this._sharing ? [] : (notification.actions ?? []).slice(0, MAX_ACTIONS);
-        for (const action of actions) {
-            tools.add_child(pillButton(action.label, 'isle-pill-small isle-notification-action', () => {
-                action.activate();
-                this.emit('request-close');
-            }));
-        }
         if (!notification.resident) {
             const dismiss = iconButton('isle-close-symbolic', 'isle-button-flat isle-notification-dismiss',
                 () => notification.destroy(), {size: 10, accessibleName: 'Dismiss'});

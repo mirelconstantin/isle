@@ -10,6 +10,15 @@
       <summary>Top bar style</summary>
       <description>“glass”: see-through, with no colour of its own, with the island as a black notch hanging from the top of the screen. “black”: the island blends into a black bar. (A “theme” setting from before 0.7.3 reads as glass.)</description>
     </key>
+    <key name="island-theme" type="s">
+      <choices>
+        <choice value="black"/>
+        <choice value="glass"/>
+      </choices>
+      <default>'black'</default>
+      <summary>The island's look</summary>
+      <description>black: Isle's own black island. glass: dark glass over what is behind it, blurred, as Blur my Shell draws GNOME's menus.</description>
+    </key>
     <key name="top-bar-opacity" type="i">
       <range min="0" max="100"/>
       <default>0</default>
@@ -109,6 +118,11 @@
       <default>5</default>
       <summary>Minutes before an event its alert shows</summary>
     </key>
+    <key name="event-calendar" type="s">
+      <default>''</default>
+      <summary>Where new events go</summary>
+      <description>The desktop calendar (an Evolution Data Server source uid, such as an Online Accounts calendar) the Calendar page and the assistant add events to; "isle" for Isle's own calendar on this computer; empty for the first account's calendar, or Isle's own without one.</description>
+    </key>
     <key name="world-clocks" type="b">
       <default>true</default>
       <summary>World clocks on the Calendar page</summary>
@@ -117,7 +131,17 @@
     <key name="hidden-pages" type="as">
       <default>[]</default>
       <summary>Pages left out of the island</summary>
-      <description>Names of the open island’s pages that have no tab: music, notifications, focus, reminders, shelf, calendar, devices.</description>
+      <description>Names of the open island’s pages that have no tab: music, notifications, focus, reminders, shelf, calendar, devices. The Apps and Usage pages have their own switches (app-usage, usage-enabled).</description>
+    </key>
+    <key name="app-usage" type="b">
+      <default>false</default>
+      <summary>The Apps page, timing the application in front</summary>
+      <description>Shows the Apps page and times the application in front, whether or not there is keyboard or pointer input, keeping 30 days on this computer. Time pauses after five idle minutes, unless a video or another program holds the session awake. Off until you turn it on; off, nothing is timed and the page has no tab.</description>
+    </key>
+    <key name="app-usage-clear" type="b">
+      <default>false</default>
+      <summary>Clear app usage once</summary>
+      <description>Settings asks the island to forget the app usage; the island resets this to false when it has.</description>
     </key>
     <key name="agent-alerts-claude" type="b">
       <default>true</default>
@@ -174,6 +198,11 @@
       <default>false</default>
       <summary>Internal: Do Not Disturb was turned on by a focus session</summary>
       <description>Kept across restarts and the lock screen so Isle can turn it off again afterwards.</description>
+    </key>
+    <key name="focus-dnd-declined" type="x">
+      <default>-1</default>
+      <summary>Internal: the focus session Do Not Disturb was turned off in</summary>
+      <description>When that session started (milliseconds), so Do Not Disturb stays off until it ends, past the lock screen too; -1 for none.</description>
     </key>
     <key name="clipboard-history" type="b">
       <default>true</default>

@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 zickrian
 
-// Turns Do Not Disturb on for focus phases, and only ever undoes what it did.
+// Turns Do Not Disturb on for focus sessions, and only ever undoes what it did (see focusRules.js).
 // That is saved, so it survives the lock screen (DND stays on) and shell crashes.
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+
+import {focusSession, focusStep} from './focusRules.js';
 
 /** Keeps Do Not Disturb in step with the focus timer. */
 export class FocusMode {
@@ -23,9 +25,13 @@ export class FocusMode {
                 this._sync();
         });
         this._dndId = notifications.connect('dnd-changed', () => {
-            // The user turned it off themselves: it is theirs again.
-            if (!this._changing && this._owned && !notifications.dnd)
-                this._owned = false;
+            // The user turned it off themselves: it is theirs again, and stays off for the rest of the session.
+            if (this._changing || notifications.dnd)
+                return;
+            this._owned = false;
+            const session = this._session();
+            if (session !== null)
+                this._declined = session;
         });
         this._settingsId = settings.connect('changed::focus-dnd', () => this._sync());
         this._sync();
@@ -42,29 +48,38 @@ export class FocusMode {
             this._settings.set_boolean('focus-dnd-owned', owned);
     }
 
-    /** Turns DND on when a focus phase starts and off when Isle's own claim ends. */
+    /** The session (its start) the user turned Do Not Disturb off in, saved past the lock screen. */
+    get _declined() {
+        return this._settings.get_int64('focus-dnd-declined');
+    }
+
+    /** Saves it, writing only when it changes. */
+    set _declined(session) {
+        if (session !== this._declined)
+            this._settings.set_int64('focus-dnd-declined', session);
+    }
+
+    /** The focus session under way that wants Do Not Disturb (see `focusSession`), or null. */
+    _session() {
+        return this._settings.get_boolean('focus-dnd') ? focusSession(this._daemon.state.pomodoro) : null;
+    }
+
+    /** Turns DND on as a focus session starts and off when Isle's own claim ends. */
     _sync() {
-        const phase = this._daemon.state.pomodoro?.phase;
         // Not known until isled answers; don't switch anything off before.
-        if (phase === undefined)
+        if (this._daemon.state.pomodoro?.phase === undefined)
             return;
-        // A paused focus session is still a focus session.
-        const focusing = phase === 'focus' && this._settings.get_boolean('focus-dnd');
-        if (focusing && !this._owned) {
-            if (!this._notifications.dnd) {
-                this._owned = true;
-                this._setDnd(true);
-            } else if (this._timedDndActive) {
-                // A timed Do Not Disturb has it on already; the session shares the claim until one ends.
-                this._owned = true;
-            }
-            // On by the user: the session leaves it theirs.
-        } else if (!focusing && this._owned) {
-            this._owned = false;
-            // A timed Do Not Disturb still running keeps it on.
-            if (!this._timedDndActive)
-                this._setDnd(false);
-        }
+        // A timed Do Not Disturb is not the user's own switch: the session claims it too, so it stays on
+        // after either of them ends.
+        const timed = this._timedDndActive;
+        const step = focusStep({session: this._session(), dnd: this._notifications.dnd && !timed,
+            owned: this._owned, declined: this._declined});
+        this._owned = step.owned;
+        this._declined = step.declined;
+        if (step.dnd === true)
+            this._setDnd(true);
+        else if (step.dnd === false && !timed)
+            this._setDnd(false);
     }
 
     /** Whether a timed Do Not Disturb still has time left. */

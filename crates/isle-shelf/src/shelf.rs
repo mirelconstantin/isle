@@ -6,7 +6,6 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::time::Duration;
 
 use gtk::{gdk, gdk_pixbuf, gio, glib, prelude::*};
 use gtk4 as gtk;
@@ -24,8 +23,6 @@ const SHELF_ICON: &[u8] = include_bytes!("../../../gnome-extension/icons/isle-sh
 const CAPACITY: usize = 6;
 /// Hidden this long, the helper quits, its memory freed; the extension's next Show starts it again.
 const IDLE_QUIT_SECS: u32 = 20;
-/// The drop area flashes this long once a file lands (see style.css).
-const LANDED_FOR: Duration = Duration::from_millis(700);
 
 /// Why the files dragged over the window can't all land.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -134,7 +131,7 @@ impl ShelfWindow {
         }));
         shelf.accept_drops();
         let weak = Rc::downgrade(&shelf.0);
-        shelf.0.window.connect_map(move |_| {
+        shelf.0.window.connect_map(move |window| {
             if let Some(inner) = weak.upgrade() {
                 // Just after GDK's own placement on mapping, so this one wins.
                 let shelf = ShelfWindow(inner);
@@ -143,6 +140,7 @@ impl ShelfWindow {
                     shelf.limit_input();
                 });
             }
+            announce_first_frame(window);
         });
         // Another scale (GNOME's arriving after the helper started, or `set_scale`): the same place in X pixels.
         let weak = Rc::downgrade(&shelf.0);
@@ -397,24 +395,11 @@ impl ShelfWindow {
             if refused {
                 return false;
             }
+            // The island flashes its outline as the file lands (files.js).
             shelf.call("Add", Some(&(uris,).to_variant()));
-            shelf.flash_landed();
             true
         });
         self.0.window.add_controller(target);
-    }
-
-    /// Flashes the drop area as a file lands.
-    fn flash_landed(&self) {
-        let stack = &self.0.stack;
-        stack.remove_css_class("landed");
-        stack.add_css_class("landed");
-        let stack = stack.downgrade();
-        glib::timeout_add_local_once(LANDED_FOR, move || {
-            if let Some(stack) = stack.upgrade() {
-                stack.remove_css_class("landed");
-            }
-        });
     }
 
     /// Follows isled's list of shelf files, redrawing as it changes.
@@ -443,15 +428,17 @@ impl ShelfWindow {
                 // the main thread like the rest of the UI.
                 proxy.connect_local("g-properties-changed", false, move |values| {
                     let proxy = values[0].get::<gio::DBusProxy>().ok()?;
+                    // While isled restarts the last list stays, or its tiles would all go and pop in again.
+                    let items = items(&proxy)?;
                     if let Some(inner) = weak.upgrade() {
-                        inner.items.replace(items(&proxy));
+                        inner.items.replace(items);
                         let shelf = ShelfWindow(inner);
                         shelf.render_tiles(true);
                         shelf.render();
                     }
                     None
                 });
-                shelf.0.items.replace(items(&proxy));
+                shelf.0.items.replace(items(&proxy).unwrap_or_default());
                 // What is there at start is not new.
                 shelf.render_tiles(false);
                 shelf.render();
@@ -486,10 +473,8 @@ impl ShelfWindow {
         let count = inner.items.borrow().len();
         let dragging = inner.near.get() || inner.over.get();
         let refusal = self.refusal().filter(|_| dragging);
+        // The one class with a rule (style.css): the window must draw while a file comes near.
         set_class(&inner.stack, "dropping", dragging);
-        set_class(&inner.stack, "over", inner.over.get());
-        set_class(&inner.stack, "full", refusal.is_some());
-        set_class(&inner.stack, "empty", count == 0 && !dragging);
 
         // The tiles stay as they are while a file comes in: nothing makes room or moves.
         let (title, hint) = if inner.over.get() && refusal == Some(Refusal::NotLocal) {
@@ -511,8 +496,8 @@ impl ShelfWindow {
             )
         } else {
             (
-                "Drop files here",
-                "Then drag them into any app, or click to copy",
+                "No files on the shelf",
+                "Drop files here, then drag them into any app",
             )
         };
         inner.empty_title.set_label(title);
@@ -522,15 +507,14 @@ impl ShelfWindow {
             .set_visible_child_name(if count == 0 { "empty" } else { "files" });
     }
 
-    /// Lays out a tile per file, newest first, reusing the tiles of files
-    /// already shown. With `mark_new`, tiles for new files fade in.
+    /// Lays out a tile per file, newest first. A file already shown keeps its tile where it is, or moves it;
+    /// only new files get tiles (fading in with `mark_new`) and only gone ones lose theirs, so nothing else
+    /// is taken down and put back, nor replays its arrival.
     fn render_tiles(&self, mark_new: bool) {
         let inner = &self.0;
-        while let Some(child) = inner.tiles.first_child() {
-            inner.tiles.remove(&child);
-        }
         let mut old = inner.tile_cache.take();
         let mut cache = HashMap::new();
+        let mut previous: Option<gtk::Widget> = None;
         for item in inner.items.borrow().iter() {
             let tile = old.remove(&item.uri).unwrap_or_else(|| {
                 let weak = Rc::downgrade(&self.0);
@@ -540,11 +524,36 @@ impl ShelfWindow {
                     }
                 })
             });
-            inner.tiles.append(&tile);
+            if tile.parent().is_none() {
+                inner.tiles.insert_child_after(&tile, previous.as_ref());
+            } else if tile.prev_sibling() != previous {
+                inner.tiles.reorder_child_after(&tile, previous.as_ref());
+            }
+            previous = Some(tile.clone());
             cache.insert(item.uri.clone(), tile);
+        }
+        for gone in old.into_values() {
+            inner.tiles.remove(&gone);
         }
         inner.tile_cache.replace(cache);
     }
+}
+
+/// Says `Drawn` once the window has drawn its first frame since it was shown, so the extension fades in
+/// what GTK drew, never an empty window.
+fn announce_first_frame(window: &gtk::Window) {
+    let Some(clock) = window.frame_clock() else {
+        service::announce_drawn();
+        return;
+    };
+    let handler = Rc::new(Cell::new(None));
+    let once = handler.clone();
+    handler.set(Some(clock.connect_after_paint(move |clock| {
+        if let Some(id) = once.take() {
+            clock.disconnect(id);
+        }
+        service::announce_drawn();
+    })));
 }
 
 /// The files' URIs, local ones only: isled keeps nothing else.
@@ -578,13 +587,12 @@ fn set_class(widget: &impl IsA<gtk::Widget>, class: &str, on: bool) {
     }
 }
 
-/// The shelf's items from the proxy's cached `Items` property (JSON).
-fn items(proxy: &gio::DBusProxy) -> Vec<Item> {
+/// The shelf's items from the proxy's cached `Items` property (JSON); none while isled is away.
+fn items(proxy: &gio::DBusProxy) -> Option<Vec<Item>> {
     proxy
         .cached_property("Items")
         .and_then(|value| value.get::<String>())
         .and_then(|json| serde_json::from_str(&json).ok())
-        .unwrap_or_default()
 }
 
 /// [`SHELF_ICON`] at `size` px, drawn at twice that so it stays sharp on a HiDPI screen.

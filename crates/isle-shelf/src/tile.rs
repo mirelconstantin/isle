@@ -31,8 +31,37 @@ const FRAME_HEIGHT: i32 = PREVIEW_SIZE + 6;
 const THUMBNAIL_PIXELS: i32 = PREVIEW_SIZE * 2;
 /// A new file's tile pops in for this long (see style.css).
 const FRESH_FOR: Duration = Duration::from_millis(600);
+/// While a file has no thumbnail yet, it is looked for again after each of these (the island makes one).
+const THUMBNAIL_WAITS: [Duration; 4] = [
+    Duration::from_millis(800),
+    Duration::from_millis(1500),
+    Duration::from_secs(3),
+    Duration::from_secs(5),
+];
+/// A file's thumbnail, or that making one failed.
+const THUMBNAIL_ATTRIBUTES: &str = "thumbnail::path,thumbnail::failed,thumbnail::is-valid";
+/// Kinds of file no thumbnailer draws, besides any `text/`: their icon is not waited on to give way. Whole
+/// types: a part ("xml", "zip") would also catch documents and comics that do get one (docx, cbz).
+const NO_THUMBNAIL: &[&str] = &[
+    "application/x-shellscript",
+    "application/json",
+    "application/xml",
+    "application/zip",
+    "application/x-tar",
+    "application/gzip",
+    "application/x-compressed-tar",
+    "application/x-7z-compressed",
+    "application/vnd.rar",
+    "application/x-rar",
+    "application/x-xz",
+    "application/x-bzip2",
+    "application/x-executable",
+    "application/x-sharedlib",
+];
 /// How long "Copied" shows on the tile.
 const COPIED_FOR: Duration = Duration::from_millis(1100);
+/// How long a drop waits for the app it landed on to answer before the drag ends anyway.
+const DROP_ANSWER_WITHIN: Duration = Duration::from_secs(3);
 
 /// Image types copied as the picture itself, so chat apps paste an image
 /// rather than a file. Others (and these, if unreadable) go as a file.
@@ -99,15 +128,33 @@ pub fn new(item: &Item, fresh: bool, on_remove: impl Fn(String) + 'static) -> gt
     let source = gtk::DragSource::new();
     source.set_actions(gdk::DragAction::COPY);
     let dragged = file.clone();
+    // Its URI alone: offered as a file list, GTK adds the document portal's types, and Chrome
+    // (WhatsApp Web, Gmail) then takes no drop at all.
     source.connect_prepare(move |_, _, _| {
-        let files = gdk::FileList::from_array(std::slice::from_ref(&dragged));
-        Some(gdk::ContentProvider::for_value(&files.to_value()))
+        let uris = glib::Bytes::from_owned(format!("{}\r\n", dragged.uri()).into_bytes());
+        Some(gdk::ContentProvider::for_bytes("text/uri-list", &uris))
     });
     let drag_icon = preview.clone();
-    source.connect_drag_begin(move |source, _| {
+    source.connect_drag_begin(move |source, drag| {
         let paintable = gtk::WidgetPaintable::new(Some(&drag_icon));
         source.set_icon(Some(&paintable), PREVIEW_SIZE / 2, PREVIEW_SIZE / 2);
         service::announce_dragging(true);
+        // Mutter may never answer a drop from XWayland, leaving the icon on screen and the drag
+        // open: once dropped the icon goes, and the drag ends by itself if no answer comes.
+        let source = source.downgrade();
+        drag.connect_drop_performed(move |drag| {
+            if let Some(icon) = drag.drag_surface() {
+                icon.hide();
+            }
+            let (source, drag) = (source.clone(), drag.downgrade());
+            glib::timeout_add_local_once(DROP_ANSWER_WITHIN, move || {
+                if let (Some(source), Some(drag)) = (source.upgrade(), drag.upgrade())
+                    && source.drag().as_ref() == Some(&drag)
+                {
+                    source.drag_cancel();
+                }
+            });
+        });
     });
     // Also after a cancelled drag.
     source.connect_drag_end(|_, _, _| service::announce_dragging(false));
@@ -247,7 +294,7 @@ fn load_preview(
     glib::spawn_future_local(async move {
         let Ok(info) = file
             .query_info_future(
-                "standard::content-type,standard::icon,thumbnail::path",
+                &format!("standard::content-type,standard::icon,{THUMBNAIL_ATTRIBUTES}"),
                 gio::FileQueryInfoFlags::NONE,
                 glib::Priority::LOW,
             )
@@ -261,17 +308,45 @@ fn load_preview(
             icon.set_from_gicon(&gicon);
         }
 
-        let source = info
+        let picture = kind
+            .as_deref()
+            .is_some_and(|kind| kind.starts_with("image/"));
+        // Pictures and videos fill the square; a document's page shows whole, as in Files.
+        let whole = !picture
+            && !kind
+                .as_deref()
+                .is_some_and(|kind| kind.starts_with("video/"));
+        let mut source = info
             .attribute_byte_string("thumbnail::path")
             .map(PathBuf::from)
-            .or_else(|| {
-                kind.as_deref()
-                    .is_some_and(|kind| kind.starts_with("image/"))
-                    .then(|| file.path())
-                    .flatten()
-            });
+            .or_else(|| picture.then(|| file.path()).flatten());
+        // None yet: the island makes one as Files would (a PDF's first page); looked for again meanwhile,
+        // unless it is a kind no thumbnailer draws (text, an archive), which keeps its icon.
+        let drawable = !kind
+            .as_deref()
+            .is_some_and(|kind| kind.starts_with("text/") || NO_THUMBNAIL.contains(&kind));
+        let mut failed = thumbnail_failed(&info);
+        for wait in THUMBNAIL_WAITS {
+            if source.is_some() || !drawable || failed {
+                break;
+            }
+            glib::timeout_future(wait).await;
+            let info = file
+                .query_info_future(
+                    THUMBNAIL_ATTRIBUTES,
+                    gio::FileQueryInfoFlags::NONE,
+                    glib::Priority::LOW,
+                )
+                .await
+                .ok();
+            source = info
+                .as_ref()
+                .and_then(|info| info.attribute_byte_string("thumbnail::path"))
+                .map(PathBuf::from);
+            failed = info.is_some_and(|info| thumbnail_failed(&info));
+        }
         let Some(source) = source else { return };
-        let texture = gio::spawn_blocking(move || square_texture(&source)).await;
+        let texture = gio::spawn_blocking(move || square_texture(&source, whole)).await;
         if let Ok(Some(texture)) = texture {
             let picture = gtk::Image::builder()
                 .paintable(&texture)
@@ -280,19 +355,47 @@ fn load_preview(
                 .build();
             preview.remove(&icon);
             preview.append(&picture);
-            preview.add_css_class("thumbnail");
+            preview.add_css_class(if whole { "page" } else { "thumbnail" });
         }
     });
 }
 
-/// The middle square of the image at `path`, scaled to [`THUMBNAIL_PIXELS`].
+/// Whether making a thumbnail already failed for the file as it is now; it is not tried again until
+/// the file changes, as in Files (thumbnails.js).
+fn thumbnail_failed(info: &gio::FileInfo) -> bool {
+    info.boolean("thumbnail::failed") && info.boolean("thumbnail::is-valid")
+}
+
+/// The image at `path`, [`THUMBNAIL_PIXELS`] a side: its middle square, or `whole`, fitted on a clear square.
 /// Runs on a worker thread: big photos take a while to decode.
-fn square_texture(path: &Path) -> Option<gdk::Texture> {
+fn square_texture(path: &Path, whole: bool) -> Option<gdk::Texture> {
     let (_, width, height) = gdk_pixbuf::Pixbuf::file_info(path)?;
     if width <= 0 || height <= 0 {
         return None;
     }
     let side = THUMBNAIL_PIXELS;
+    if whole {
+        let scale = f64::from(side) / f64::from(width.max(height));
+        let fitted_width = ((f64::from(width) * scale).round() as i32).max(1);
+        let fitted_height = ((f64::from(height) * scale).round() as i32).max(1);
+        let page = gdk_pixbuf::Pixbuf::from_file_at_scale(path, fitted_width, fitted_height, false)
+            .ok()?
+            .add_alpha(false, 0, 0, 0)
+            .ok()?;
+        let square = gdk_pixbuf::Pixbuf::new(gdk_pixbuf::Colorspace::Rgb, true, 8, side, side)?;
+        square.fill(0);
+        page.copy_area(
+            0,
+            0,
+            fitted_width,
+            fitted_height,
+            &square,
+            (side - fitted_width) / 2,
+            (side - fitted_height) / 2,
+        );
+        #[allow(deprecated)] // the replacement needs GTK 4.20
+        return Some(gdk::Texture::for_pixbuf(&square));
+    }
     let scale = f64::from(side) / f64::from(width.min(height));
     let scaled_width = ((f64::from(width) * scale).round() as i32).max(side);
     let scaled_height = ((f64::from(height) * scale).round() as i32).max(side);

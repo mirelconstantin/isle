@@ -7,8 +7,8 @@ reporting.
 
 | Version | Supported |
 |---|---|
-| 1.2.x | Yes |
-| 1.1.x and older | No |
+| 1.4.x | Yes |
+| 1.3.x and older | No |
 
 ## Reporting a vulnerability
 
@@ -30,10 +30,12 @@ the tagged source and carry a build provenance attestation. With the
 [GitHub CLI](https://cli.github.com):
 
 ```sh
-gh attestation verify isle-1.0.0-x86_64-linux.tar.gz --repo zickrian/isle
+gh attestation verify isle-<version>-x86_64-linux.tar.gz --repo zickrian/isle
 ```
 
-`get.sh` also checks each download against the release's `.sha256`.
+`get.sh` also checks each download against the release's `.sha256`, and the
+AUR package `isle-bin` checks the same tarball against the SHA-256 in its
+`PKGBUILD`.
 
 ## What leaves your computer
 
@@ -44,21 +46,25 @@ connects to the network only for these:
 |---|---|---|
 | Synced lyrics | [LRCLIB](https://lrclib.net) (`lrclib.net/api`) | The playing song's title, artist, album and length, once per song (then cached) |
 | Cover art | The address the music player gives for the song's cover | A plain download of that picture, once per song (then cached) |
-| Claude plan usage | `api.anthropic.com/api/oauth/usage` | Claude Code's own sign-in token, read from Claude Code's credentials; Isle never signs in or refreshes it. Off when AI usage is turned off |
-| Voice assistant | The AI command-line app you picked (Claude Code, Codex or Antigravity), which sends it to its own service under your plan | The text of your request (speech is turned into text on this computer), the context it needs (time, open apps and windows, reminders and events, which Linux and package managers this is), the output of the checks and commands it runs for you (with keys, tokens and passwords blanked), the conversation so far and, only if you allow it, the selected text or your notifications |
+| Claude plan usage | `api.anthropic.com/api/oauth/usage` | Claude Code's own sign-in token, read from Claude Code's credentials; Isle never signs in or refreshes it. Off when AI usage, or Claude in it, is turned off |
+| ChatGPT plan usage | `chatgpt.com/backend-api/wham/usage` | Codex's own sign-in token and account id, read from Codex's `auth.json`; Isle never signs in or refreshes it. Off when AI usage, or ChatGPT in it, is turned off |
+| Grok plan usage | Grok's own billing (`cli-chat-proxy.grok.com/v1`, or the address set in Grok's own config; https only) | Grok's own sign-in token and user id, read from Grok's sign-in; Isle never signs in or refreshes it. Off when AI usage, or Grok in it, is turned off |
+| Voice assistant | The AI command-line app you picked (Claude Code, Codex, Antigravity or Grok), which sends it to its own service under your plan | The text of your request (speech is turned into text on this computer), the context it needs (time, open apps and windows, reminders and events, which Linux and package managers this is), the output of the checks and commands it runs for you (with keys, tokens and passwords blanked), the conversation so far and, only if you allow it, the selected text or your notifications |
 | Web search by the assistant | Whatever the AI's own web search and page reading reach | Search words and page addresses the AI chooses for your request |
 | Package checks by the assistant | Your package managers' own servers (npm's registry, Snap and Flatpak stores, dnf's mirrors) | Package names it looks up, when a check like `npm view codex` or `snap find vlc` asks them |
 | Song check | `open.spotify.com/oembed` | A Spotify link the AI suggested, to check it exists before playing it |
 | New versions | `api.github.com` (Isle's latest release) | A plain request, at most once a day; off when New versions is turned off in Settings |
 | Speech model | `huggingface.co` (the official whisper.cpp and Silero files) | A plain download, only when you run `isle-setup-voice` (or press Set up); each file's SHA-256 is checked |
+| Events you add to an account's calendar | That account's server (Google, or another in Online Accounts), through Evolution Data Server, as any calendar app sends it | The event's title, day and time, once, when you add it to that calendar (picked with the chip in the add field). Just before, isled opens a connection to that server and closes it, sending nothing, to see it is in reach; behind a proxy it skips that |
 
-ChatGPT plan usage is read from Codex's own logs on this computer, with no
-network at all.
+When ChatGPT can't be asked (offline, signed out), its limits are read from
+Codex's own logs on this computer, with no network at all.
 
 ## What stays on your computer
 
-- The clipboard history, shelf, reminders, calendar events you add in Isle,
-  timer settings and the assistant's conversation, in `~/.local/share/isle`
+- The clipboard history, shelf, reminders, calendar events kept in Isle (with
+  Isle picked, with no account, or waiting for their calendar's server to be
+  in reach), timer settings and the assistant's conversation, in `~/.local/share/isle`
   (readable by you only). The conversation is deleted, with the AI's own
   copy of it, at midnight at the latest (or after 30 minutes or 2 hours
   quiet, as set in Settings), on **+**, and on **Clear the conversation
@@ -101,8 +107,10 @@ The history keeps text, links, images and files you copy, on this computer
 only, and can be turned off in Settings. Copies marked as secrets by password
 managers (`x-kde-passwordManagerHint`), and every copy from the apps on the
 ignore list (KeePassXC, Bitwarden, 1Password, Secrets, Seahorse, Proton Pass
-by default; editable in Settings), are never kept. Clearing the history
-deletes its files.
+by default; editable in Settings), are never kept. When the password manager
+quits, GNOME puts its last copy back without the mark; to leave that out too,
+Isle keeps a salted hash of the secret in memory until the next copy, never
+the secret itself. Clearing the history deletes its files.
 
 ## The voice assistant's safety model
 
@@ -112,8 +120,9 @@ deletes its files.
   cursor is).
 - Each AI is started with only web search and reading pages: Claude Code with
   just its web tools, Codex with its shell, file, browser and computer-use
-  tools off, and agy in its own home folder behind a hook that refuses
-  anything else.
+  tools off, agy in its own home folder behind a hook that refuses anything
+  else, and Grok in its own home folder (sharing only your sign-in) with its
+  terminal, file editing, task and image tools refused.
 - Files: Isle searches by name for it, within your home folder and removable
   drives, and reads only small plain-text files you ask about. It skips
   hidden folders, never searches those that hold keys or passwords (`.ssh`,
@@ -159,6 +168,10 @@ Areas where a report is especially welcome:
   hidden or private files, or gain root without GNOME's password dialog.
 - The AI agents' hooks: a way for another program to answer an agent's
   permission, or to read what the agents ask.
+- The AI usage page: a sign-in token (Claude Code's, Codex's or Grok's) sent
+  anywhere but its own service, or written anywhere.
+- The calendar: an event sent to a calendar you didn't pick, or one you
+  deleted in Isle left in your account's calendar.
 - The clipboard history in `~/.local/share/isle`: copies kept from apps on
   the ignore list or marked as secrets, or files readable by other users.
 - Network requests: anything sent beyond what the table above lists.

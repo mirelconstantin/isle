@@ -18,13 +18,10 @@ import * as Playback from './playback.js';
 import {watchClock} from './wallClock.js';
 import {Art, Bars, PrivacyDots, RecordingDot, Ring, icon, restsAt} from './widgets.js';
 
-/** The assistant at work, in the right slot. */
-const ASSISTANT_SIZE = 18;
-
 /** Sizes hanging below the top bar, and inside it with smaller text, in CSS pixels. */
 const SIZES = {
-    hanging: {clock: 164, activities: 256, art: 24, artRadius: 6, ring: 20, bars: 16, moon: 14, call: 15},
-    inBar: {clock: 144, activities: 232, art: 22, artRadius: 6, ring: 18, bars: 14, moon: 13, call: 14},
+    hanging: {clock: 164, activities: 256, art: 24, artRadius: 6, ring: 20, bars: 16, moon: 14, call: 15, bot: 19.5},
+    inBar: {clock: 144, activities: 232, art: 22, artRadius: 6, ring: 18, bars: 14, moon: 13, call: 14, bot: 17.5},
 };
 /** Between the Do Not Disturb moon and the time, in CSS pixels (as .isle-compact-clock-box's spacing). */
 const MOON_GAP = 6;
@@ -70,7 +67,8 @@ export const CompactView = GObject.registerClass({
         // isled is not running: what needs it cannot work (see the controller's service watch).
         this._serviceDown = new St.Icon({gicon: icon('dialog-warning-symbolic'), icon_size: 15, style_class: 'isle-compact-warning', y_align: Clutter.ActorAlign.CENTER});
         // The assistant at work with the island closed: still, but for a blink and a glance every few seconds.
-        this._assistant = new BotIcon(ASSISTANT_SIZE, this._botLook());
+        // In a slot as big as the cover's, as far in from the edge; a little smaller, as a solid shape looks bigger.
+        this._assistant = new BotIcon(SIZES.hanging.art, this._botLook(), {body: SIZES.hanging.bot});
         this._assistant.y_align = Clutter.ActorAlign.CENTER;
         this._botLookChanged = ['bot-shape', 'bot-color', 'bot-glow'].map(key =>
             settings.connect(`changed::${key}`, () => (this._assistant.look = this._botLook())));
@@ -85,7 +83,7 @@ export const CompactView = GObject.registerClass({
         times.add_child(this._clock);
         times.add_child(this._elapsed);
         times.add_child(this._callTime);
-        // Do Not Disturb: a moon before the time (or what takes its place), as iOS shows a Focus, whatever the sides hold.
+        // Do Not Disturb: a moon before the time (or what takes its place), whatever the sides hold.
         this._moon = new St.Icon({gicon: icon('isle-moon'), icon_size: 14, style_class: 'isle-dnd-moon', y_align: Clutter.ActorAlign.CENTER, visible: false});
         const centerRow = new St.BoxLayout({style_class: 'isle-compact-clock-box', x_align: Clutter.ActorAlign.CENTER, y_align: Clutter.ActorAlign.CENTER});
         centerRow.add_child(this._moon);
@@ -229,6 +227,7 @@ export const CompactView = GObject.registerClass({
         this._inBar = inBar;
         const size = SIZES[inBar ? 'inBar' : 'hanging'];
         this._art.resize(size.art, size.artRadius);
+        this._assistant.resize(size.art, size.bot);
         this._ring.resize(size.ring);
         this._bars.maxHeight = this._secondBars.maxHeight = size.bars;
         this._moon.icon_size = size.moon;
