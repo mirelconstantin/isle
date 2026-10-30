@@ -21,6 +21,11 @@ your screen.
 
 </div>
 
+> [!NOTE]
+> **Fork Information:**
+> This repository is a fork of [zickrian/isle](https://github.com/zickrian/isle) by Daniel Espejo (@zickrian).
+> This fork is maintained by Mirel Constantin at **[mirelconstantin/isle](https://github.com/mirelconstantin/isle)**. It includes workflow enhancements, device battery monitoring, clipboard stack, focus stats, and display fixes described in [What this fork does differently](#what-this-fork-does-differently).
+
 Isle turns the centre of the top bar into a black notch.
 At rest it shows the time and what is going on (a song, a timer, a
 recording, or two of them at once). Rest the pointer on it and it opens with spring physics into a
@@ -30,6 +35,7 @@ appear in the same place instead of in the middle of the screen.
 
 ## Contents
 
+- [What this fork does differently](#what-this-fork-does-differently)
 - [Features](#features)
 - [Requirements](#requirements)
 - [Installation](#installation)
@@ -46,6 +52,34 @@ appear in the same place instead of in the middle of the screen.
 - [Contributing](#contributing)
 - [Support](#support)
 - [License](#license)
+
+## What this fork does differently
+
+This fork ([mirelconstantin/isle](https://github.com/mirelconstantin/isle)) builds on upstream Isle 1.5.0 with workflow additions and multi-monitor fixes:
+
+- **Command surface (`Super+K`)**:
+  A unified quick launcher and search bar overlaying the island. Press `Super+K` to search across island pages, actions (play/pause, DND, focus timer, join meeting), clipboard history, reminders, today's calendar events, and installed applications. You can also type any query and immediately add it as a reminder, create a calendar event for today, or send it to the AI assistant. Configurable shortcut in *Settings → Island → Shortcuts*.
+
+- **Devices page & peripheral battery monitoring**:
+  A dedicated **Devices** tab in the open island that lists currently connected devices: Bluetooth peripherals (via BlueZ) as well as wireless mice or keyboards on their own USB receivers (such as Logitech Lightspeed / HID++ devices via UPower). Shows battery percentage and low-battery warnings ("No battery" for devices without battery reporting).
+
+- **Clipboard stack & multi-paste (`Super+Alt+V`)**:
+  Queue multiple clips in the Shelf by checking cards in **Stack** mode. Press **Paste next** (or `Super+Alt+V` globally) to paste queued cards into the frontmost window in sequence. Clipboard history search supports rich filters (`from:<app>`, `type:<image|link|text|files>`, and `before:<date|days>`), with configurable history retention in *Settings → Clipboard* (1, 7, 30, or 90 days).
+
+- **Focus figures & deep work stats**:
+  The Focus tab tracks today's completed focus sessions and total focused time, alongside a 7-day mini bar graph. Reminders feature a ▶ button on hover to instantly start a focus session on that task with "Focusing on [task]" and a single-click **Done** button. The page also previews the next calendar meeting with a direct **Join** button and applies a quiet ambient tint to the island during work sessions.
+
+- **Header Join pill**:
+  A blue **Join · HH:MM** pill appears directly in the open island header 10 minutes before any calendar event with a video meeting link (Google Meet, Zoom, Microsoft Teams, Webex) and remains throughout the call.
+
+- **Timed Do Not Disturb (DND)**:
+  Quickly set DND for **30 minutes**, **1 hour**, **until tomorrow 9:00**, or off using the dropdown chevron next to the DND moon. Displays the scheduled end time ("until 14:30"), persists across screen lock and restart, and only disables DND if Isle was the one that turned it on.
+
+- **Island sheen & visual polish**:
+  A faint top-edge sheen and a 1 px hairline rim on the black island, quiet contextual color washes for Calendar and DND Notifications, and an accessible 2 px keyboard focus ring.
+
+- **Multi-monitor display fix**:
+  Ensures the closed island retains its full size (256×30) without shrinking when placed on or moved to a secondary monitor without a GNOME top bar.
 
 ## Features
 
@@ -210,7 +244,7 @@ one-line install above:
 
 ```sh
 sudo pacman -S --needed base-devel git
-git clone --depth 1 https://github.com/zickrian/isle.git
+git clone --depth 1 https://github.com/mirelconstantin/isle.git
 cd isle/packaging/aur
 makepkg -si
 # Log out and back in, then:
@@ -249,7 +283,7 @@ the GPU the Vulkan headers and glslc:
 sudo apt install git build-essential pkg-config libgtk-4-dev cmake libclang-dev libvulkan-dev glslc
 # Fedora: git gcc-c++ pkgconf gtk4-devel cmake clang-devel vulkan-loader-devel glslc
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-git clone https://github.com/zickrian/isle.git
+git clone https://github.com/mirelconstantin/isle.git
 cd isle
 ./install.sh
 ```
@@ -268,7 +302,9 @@ cd isle
 | Rest the pointer on an alert | Keep it until the pointer leaves |
 | Swipe up or down on an alert (touchpad) | Put it away, or open it |
 | Right-click the notch | Put an alert away; else bring the call, or the music player, to the front |
+| Super+K | Open the command surface: search pages, actions, clipboard, reminders, events and apps; add task or event |
 | Super+V | Open the clipboard history with search ready; Enter pastes |
+| Super+Alt+V | Paste the next stacked copy from the clipboard history |
 | Drag a file towards the notch | Open the files tray to drop it |
 | Super+I | Ask the voice assistant; press again to finish speaking, or after an answer to ask more. Start typing (or click the keyboard) to type the request instead |
 | Enter or Esc on the assistant's card | Run or Deny the command it shows |
@@ -295,7 +331,8 @@ Click the gear right of the clock in the open island (or Isle's gear in the
   is behind it (windows and wallpaper) blurred, as GNOME's menus look with
   Blur my Shell; the top bar on a slider from glass (default) to black; which pages the open island has (Music,
   Notifications, Focus, Reminders, Shelf, Calendar, Devices, Apps, AI Usage) and whether it
-  has the AI assistant at all; world clocks, and their cities;
+  has the AI assistant at all; shortcuts for the command surface (Super+K),
+  the assistant (Super+I), and opening the island; world clocks, and their cities;
   the closed island inside the bar or hanging below it; with more than one
   display, on the main one or the one you are using; opening when the
   pointer rests on it (and for how long) or only on a click.
@@ -306,9 +343,12 @@ Click the gear right of the clock in the open island (or Isle's gear in the
   a reminder before calendar events, and how many minutes before.
   Alerts other than a low battery are not shown while Do Not Disturb is on.
 - **Calls:** show calls in the island, and the live preview of the call.
-- **Clipboard:** turn the history on or off, clear it, and choose apps whose
-  copies are never kept (password managers are on the list from the start).
-- **Focus timer:** session and break lengths, Do Not Disturb while focusing.
+- **Clipboard:** turn the history on or off, clear it, choose how long to keep
+  copies (1, 7, 30, or 90 days), the shortcut for pasting the next stacked copy
+  (Super+Alt+V), and choose apps whose copies are never kept (password managers
+  are on the list from the start).
+- **Focus timer:** session and break lengths, Do Not Disturb while focusing,
+  timed Do Not Disturb presets, and focus figures.
 - **Assistant:** the bot's look (shape, colour, glow, with a live
   preview); the assistant on or off, its shortcut, which AI answers and with
   which model (only those your plan includes, with your plan's name), speech recognition, language, and whether it may use the text
@@ -626,7 +666,9 @@ else lives in Rust behind a D-Bus API.
 
 ## Contributing
 
-Bug reports, ideas and pull requests are welcome. See
+Bug reports, ideas and pull requests are welcome. This repository is
+[mirelconstantin/isle](https://github.com/mirelconstantin/isle), a fork of
+[zickrian/isle](https://github.com/zickrian/isle). See
 [CONTRIBUTING.md](CONTRIBUTING.md) for how to build, test and send changes,
 and [CHANGELOG.md](CHANGELOG.md) for what changed. Everyone taking part
 follows the [Code of Conduct](CODE_OF_CONDUCT.md); please report security

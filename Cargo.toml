@@ -17,7 +17,7 @@ edition = "2024"
 # isle-core and isled use let chains (1.88); isle-shelf sets its own, for gtk-rs.
 rust-version = "1.88"
 license = "GPL-3.0-or-later"
-repository = "https://github.com/zickrian/isle"
+repository = "https://github.com/mirelconstantin/isle"
 # Released as programs, not on crates.io.
 publish = false
 
