@@ -10,7 +10,7 @@ use zbus::fdo::{ObjectManagerProxy, PropertiesProxy};
 use zbus::message::Type as MessageType;
 use zbus::names::InterfaceName;
 use zbus::object_server::InterfaceRef;
-use zbus::zvariant::{ObjectPath, OwnedValue};
+use zbus::zvariant::{ObjectPath, OwnedObjectPath, OwnedValue};
 use zbus::{Connection, MatchRule, MessageStream};
 
 use super::{BluetoothDevice, SystemEvent, SystemService, publish};
@@ -18,6 +18,15 @@ use super::{BluetoothDevice, SystemEvent, SystemService, publish};
 const BLUEZ: &str = "org.bluez";
 const DEVICE: &str = "org.bluez.Device1";
 const BATTERY: &str = "org.bluez.Battery1";
+/// UPower's own battery devices: a mouse or keyboard on its USB receiver reports there and not in
+/// BlueZ (Logitech's HID++), and GNOME's Power settings list it beside the Bluetooth ones.
+const UPOWER: &str = "org.freedesktop.UPower";
+const UPOWER_DEVICE: &str = "org.freedesktop.UPower.Device";
+/// Where UPower keeps them, kept apart from BlueZ's own paths.
+const UPOWER_PATH: &str = "/org/freedesktop/UPower/devices/";
+/// The UPower kinds worth a row (its `Type`): mouse, keyboard, gaming input, pen, touchpad, headset,
+/// speakers, headphones, other audio, remote control, wearable, toy.
+const UPOWER_KINDS: [u32; 12] = [5, 6, 12, 13, 14, 17, 18, 19, 21, 22, 26, 27];
 /// Headsets usually report their battery a moment after connecting.
 const BATTERY_GRACE: Duration = Duration::from_millis(2500);
 
@@ -33,10 +42,16 @@ pub async fn watch(system: Connection, iface: InterfaceRef<SystemService>) -> an
         .build()
         .await?;
     // Only devices' and their batteries' changes: adapters and media transports change often.
-    let mut changes = futures_util::stream::select(
-        properties_changed(&system, DEVICE).await?,
-        properties_changed(&system, BATTERY).await?,
+    let bluez_changes = futures_util::stream::select(
+        properties_changed(&system, BLUEZ, DEVICE).await?,
+        properties_changed(&system, BLUEZ, BATTERY).await?,
     );
+    let upower_changes = futures_util::stream::select(
+        properties_changed(&system, UPOWER, UPOWER_DEVICE).await?,
+        // A receiver plugged in or taken out: UPower has no object manager, only these two.
+        signals(&system, UPOWER, UPOWER).await?,
+    );
+    let mut changes = futures_util::stream::select(bluez_changes, upower_changes);
     let mut added = manager.receive_interfaces_added().await?;
 
     // Devices that were already connected when Isle started.
@@ -54,6 +69,7 @@ pub async fn watch(system: Connection, iface: InterfaceRef<SystemService>) -> an
             }
         }
     }
+    connected.extend(upower_peripherals(&system).await);
     publish(&iface, |state| state.bluetooth = connected, None).await;
     let generations = Generations::default();
 
@@ -63,12 +79,21 @@ pub async fn watch(system: Connection, iface: InterfaceRef<SystemService>) -> an
                 let Ok(message) = message else { continue };
                 let header = message.header();
                 let Some(path) = header.path() else { continue };
+                if matches!(
+                    header.member().map(|member| member.as_str()),
+                    Some("DeviceAdded" | "DeviceRemoved")
+                ) {
+                    sync_peripherals(&system, &iface).await;
+                    continue;
+                }
                 let Ok((interface, changed, _)) =
                     message.body().deserialize::<(String, HashMap<String, OwnedValue>, Vec<String>)>()
                 else {
                     continue;
                 };
-                if interface == DEVICE {
+                if interface == UPOWER_DEVICE {
+                    sync_peripherals(&system, &iface).await;
+                } else if interface == DEVICE {
                     if let Some(now) = changed.get("Connected").and_then(|v| bool::try_from(v).ok()) {
                         connection_changed(&system, &iface, &generations, path.to_owned(), now).await;
                     }
@@ -94,14 +119,32 @@ pub async fn watch(system: Connection, iface: InterfaceRef<SystemService>) -> an
     }
 }
 
-/// BlueZ's `PropertiesChanged` signals for `interface`.
-async fn properties_changed(system: &Connection, interface: &str) -> zbus::Result<MessageStream> {
+/// `service`'s `PropertiesChanged` signals for `interface`.
+async fn properties_changed(
+    system: &Connection,
+    service: &str,
+    interface: &str,
+) -> zbus::Result<MessageStream> {
     let rule = MatchRule::builder()
         .msg_type(MessageType::Signal)
-        .sender(BLUEZ)?
+        .sender(service)?
         .interface("org.freedesktop.DBus.Properties")?
         .member("PropertiesChanged")?
         .arg(0, interface)?
+        .build();
+    MessageStream::for_match_rule(rule, system, None).await
+}
+
+/// Every signal `service` sends on `interface`.
+async fn signals(
+    system: &Connection,
+    service: &str,
+    interface: &str,
+) -> zbus::Result<MessageStream> {
+    let rule = MatchRule::builder()
+        .msg_type(MessageType::Signal)
+        .sender(service)?
+        .interface(interface)?
         .build();
     MessageStream::for_match_rule(rule, system, None).await
 }
@@ -226,4 +269,148 @@ async fn read_device(system: &Connection, path: &ObjectPath<'_>) -> zbus::Result
         icon: text("Icon").unwrap_or_else(|| "bluetooth".into()),
         battery,
     })
+}
+
+/// A UPower peripheral's row: its model, an icon from its kind and the battery it reports. None for
+/// what is not a peripheral of its own (BlueZ's devices are listed already, with the names BlueZ has).
+async fn read_peripheral(system: &Connection, path: &ObjectPath<'_>) -> Option<BluetoothDevice> {
+    let properties = PropertiesProxy::builder(system)
+        .destination(UPOWER)
+        .ok()?
+        .path(path.to_owned())
+        .ok()?
+        .build()
+        .await
+        .ok()?;
+    let device = properties
+        .get_all(InterfaceName::from_static_str_unchecked(UPOWER_DEVICE))
+        .await
+        .ok()?;
+    let text = |key: &str| {
+        device
+            .get(key)
+            .and_then(|v| String::try_from(v.try_clone().ok()?).ok())
+    };
+    let kind = device.get("Type").and_then(|v| u32::try_from(v).ok())?;
+    let present = device
+        .get("IsPresent")
+        .and_then(|v| bool::try_from(v).ok())
+        .unwrap_or(false);
+    let percentage = device.get("Percentage").and_then(|v| f64::try_from(v).ok());
+    let (icon, battery) = peripheral_row(text("NativePath").as_deref(), kind, present, percentage)?;
+    Some(BluetoothDevice {
+        path: path.to_string(),
+        name: text("Model")
+            .filter(|model| !model.is_empty())
+            .unwrap_or_else(|| "Device".into()),
+        icon: icon.into(),
+        battery,
+    })
+}
+
+/// What a UPower device's properties decide: the icon and the battery of a peripheral of its own that
+/// is here, or None for anything else (BlueZ's own devices, a laptop battery, a device gone).
+fn peripheral_row(
+    native: Option<&str>,
+    kind: u32,
+    present: bool,
+    percentage: Option<f64>,
+) -> Option<(&'static str, Option<u8>)> {
+    // BlueZ's devices are rows already, with the names and icons BlueZ gives them.
+    if native.is_some_and(|native| native.starts_with("/org/bluez/"))
+        || !UPOWER_KINDS.contains(&kind)
+        || !present
+    {
+        return None;
+    }
+    let battery = percentage
+        .filter(|percent| (0.0..=100.0).contains(percent))
+        .map(|percent| percent.round() as u8);
+    Some((upower_icon(kind), battery))
+}
+
+/// The icon of a UPower kind, named as BlueZ names the same devices.
+fn upower_icon(kind: u32) -> &'static str {
+    match kind {
+        5 => "input-mouse",
+        6 => "input-keyboard",
+        12 | 27 => "input-gaming",
+        13 => "input-tablet",
+        14 => "input-touchpad",
+        17 | 21 => "audio-headset",
+        18 => "audio-speakers",
+        19 => "audio-headphones",
+        _ => "bluetooth",
+    }
+}
+
+/// Every peripheral UPower reports on its own, by path so the state only changes when one does.
+async fn upower_peripherals(system: &Connection) -> Vec<BluetoothDevice> {
+    let Ok(proxy) = zbus::Proxy::new(system, UPOWER, "/org/freedesktop/UPower", UPOWER).await
+    else {
+        return Vec::new();
+    };
+    let paths: Vec<OwnedObjectPath> = match proxy.call("EnumerateDevices", &()).await {
+        Ok(paths) => paths,
+        Err(_) => return Vec::new(),
+    };
+    let mut found = Vec::new();
+    for path in paths {
+        if let Some(device) = read_peripheral(system, &path).await {
+            found.push(device);
+        }
+    }
+    found.sort_by(|a, b| a.path.cmp(&b.path));
+    found
+}
+
+/// Replaces UPower's rows with what it reports now; BlueZ's own stay as they are.
+async fn sync_peripherals(system: &Connection, iface: &InterfaceRef<SystemService>) {
+    let peripherals = upower_peripherals(system).await;
+    publish(
+        iface,
+        |state| {
+            state
+                .bluetooth
+                .retain(|device| !device.path.starts_with(UPOWER_PATH));
+            state.bluetooth.extend(peripherals);
+        },
+        None,
+    )
+    .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_receiver_mouse_is_a_row_and_bluez_keeps_its_own() {
+        // Logitech's HID++ mouse: a battery UPower reports, no BlueZ device behind it.
+        assert_eq!(
+            peripheral_row(Some("hidpp_battery_0"), 5, true, Some(57.4)),
+            Some(("input-mouse", Some(57)))
+        );
+        // UPower lists BlueZ's devices too; those rows come from BlueZ itself.
+        assert_eq!(
+            peripheral_row(
+                Some("/org/bluez/hci0/dev_DB_26_5F_E4_E0_3A"),
+                6,
+                true,
+                Some(30.0)
+            ),
+            None
+        );
+        // Switched off, or not a peripheral: no row.
+        assert_eq!(
+            peripheral_row(Some("hidpp_battery_0"), 5, false, Some(57.0)),
+            None
+        );
+        assert_eq!(peripheral_row(Some("BAT1"), 2, true, Some(100.0)), None);
+        // A level UPower cannot mean is no level at all.
+        assert_eq!(
+            peripheral_row(Some("hidpp_battery_0"), 5, true, Some(255.0)),
+            Some(("input-mouse", None))
+        );
+    }
 }

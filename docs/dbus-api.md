@@ -309,7 +309,7 @@ Whether a newer Isle is out: GitHub's latest release, looked up at most once a d
 
 | Member | Signature | |
 |---|---|---|
-| `State` | `s` | `{battery: {percent (a whole number), plugged, charging} or null, network: {connected, connection, name}, bluetooth: [{path, name, icon, battery}], camera_in_use}` |
+| `State` | `s` | `{battery: {percent (a whole number), plugged, charging} or null, network: {connected, connection, name}, bluetooth: [{path, name, icon, battery}], camera_in_use}`; `path` is the BlueZ object, or UPower's device for a mouse or keyboard on its own receiver (the two kinds of device the list mixes) |
 | `Event(s json)` | signal | One of `{kind: "power", plugged, percent}`, `{kind: "battery_low", percent}`, `{kind: "battery_full"}`, `{kind: "network", connected, connection, name}`, `{kind: "bluetooth", connected, device}`. |
 
 ## io.github.zickrian.isle.ShelfWindow1

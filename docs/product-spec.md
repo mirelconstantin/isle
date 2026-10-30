@@ -424,11 +424,14 @@ spans. `isled` keeps 30 days in `~/.local/share/isle/app-usage.json`, and
 only GNOME Shell may report, read or clear them. Settings → App Usage
 clears them.
 
-**Devices**, the Bluetooth devices connected now, one row
-each: the device's icon, its name, and the battery it reports ("85%", red at
-20% or under), or "No battery" for one that reports none (many phones do
-not). Rows scroll past what fits. Empty: "No devices". The list is what
-BlueZ reports, so a device that is paired but not connected is not shown.
+**Devices**, the devices connected now, one row each: the device's icon,
+its name, and the battery it reports ("85%", red at 20% or under), or "No
+battery" for one that reports none (many phones do not). Rows scroll past
+what fits. Empty: "No devices". The list is BlueZ's connected devices, plus
+the peripherals whose own battery UPower reports and BlueZ does not know: a
+mouse or keyboard on its USB receiver (Logitech's HID++, whose battery the
+desktop's Power settings show too). A device that is paired but not
+connected is not shown.
 
 ## 6. Alerts
 

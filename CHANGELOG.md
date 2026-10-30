@@ -8,8 +8,9 @@ All notable changes to Isle are listed here. The format follows
 
 ### Added
 
-- A Devices page listing the Bluetooth devices connected now, each with the battery it reports
-  ("No battery" for one that reports none, as many phones do).
+- A Devices page listing the devices connected now — Bluetooth, or a mouse or keyboard on its own
+  receiver (Logitech's HID++, whose battery the desktop's Power settings show too) — each with the
+  battery it reports ("No battery" for one that reports none, as many phones do).
 - A command surface on Super+K: one field over the island's pages, actions, clipboard, reminders,
   today's events and installed apps; type to narrow, ↑↓ to choose, Enter to run, Esc to close. Words
   can be added as a task or an event on today, or handed to the assistant. Both shortcuts are in

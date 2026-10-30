@@ -142,12 +142,13 @@ appear in the same place instead of in the middle of the screen.
 </tr>
 </table>
 
-Also: a Devices page listing the Bluetooth devices connected now with the
-battery each reports, privacy dots while the camera, microphone or screen
-sharing is in use, a recording timer with a stop button, a slim glass top
-bar that leaves your windows uncovered, a command surface on Super+K that
-searches pages, actions, clips, reminders, events and apps, a clipboard
-stack that pastes items in order, and Do Not Disturb you can time.
+Also: a Devices page listing the devices connected now — Bluetooth, or a
+mouse or keyboard on its own receiver — with the battery each reports,
+privacy dots while the camera, microphone or screen sharing is in use, a
+recording timer with a stop button, a slim glass top bar that leaves your
+windows uncovered, a command surface on Super+K that searches pages,
+actions, clips, reminders, events and apps, a clipboard stack that pastes
+items in order, and Do Not Disturb you can time.
 
 ## Requirements
 

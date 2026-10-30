@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Devices: the Bluetooth devices connected now, with the battery each reports (isled reads BlueZ).
+// Devices: the devices connected now, with the battery each reports (isled reads BlueZ, and UPower
+// for a mouse or keyboard on its own receiver).
 
 import Clutter from 'gi://Clutter';
 import GObject from 'gi://GObject';
@@ -38,7 +39,7 @@ class DevicesPage extends Page {
         this._empty = new St.BoxLayout({...VERTICAL, style_class: 'isle-empty', x_align: Clutter.ActorAlign.CENTER, y_align: Clutter.ActorAlign.CENTER, x_expand: true});
         this._empty.add_child(new St.Icon({gicon: icon('isle-bluetooth-symbolic'), icon_size: 24, style_class: 'isle-empty-icon', x_align: Clutter.ActorAlign.CENTER}));
         this._empty.add_child(label('No devices', 'isle-empty-title', {x_align: Clutter.ActorAlign.CENTER}));
-        this._empty.add_child(label('Connect a Bluetooth device', 'isle-empty-hint', {x_align: Clutter.ActorAlign.CENTER}));
+        this._empty.add_child(label('Connect a device', 'isle-empty-hint', {x_align: Clutter.ActorAlign.CENTER}));
 
         const middle = new St.Widget({layout_manager: new Clutter.BinLayout(), x_expand: true, y_expand: true});
         middle.add_child(this._scroll);

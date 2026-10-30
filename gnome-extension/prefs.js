@@ -771,7 +771,7 @@ const PAGES = [
     ['reminders', 'Reminders', 'object-select-symbolic', 'Your to-do list'],
     ['shelf', 'Shelf', 'edit-paste-symbolic', 'Clipboard history (Super+V) and the files tray'],
     ['calendar', 'Calendar', 'x-office-calendar-symbolic', 'The month, its events and world clocks'],
-    ['devices', 'Devices', 'bluetooth-active-symbolic', 'The Bluetooth devices connected now, and their batteries'],
+    ['devices', 'Devices', 'bluetooth-active-symbolic', 'The devices connected now (Bluetooth, or a mouse on its receiver), and their batteries'],
 ];
 
 /** A switch per page; the last one on can't be turned off, so the island always has a page. */
