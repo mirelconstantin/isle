@@ -5,6 +5,7 @@
 // over a list of one-line rows, newest first. Click one to open it. See docs/product-spec.md.
 
 import Clutter from 'gi://Clutter';
+import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Pango from 'gi://Pango';
 import St from 'gi://St';
@@ -45,6 +46,7 @@ class NotificationsPage extends Page {
 
         this.add_child(this._buildBar());
         this.add_child(this._buildDndNote());
+        this.add_child(this._buildDndChoices());
         this.add_child(this._buildList());
 
         this._centerHandlers = [
@@ -73,6 +75,11 @@ class NotificationsPage extends Page {
         return this._center.hasUnseen;
     }
 
+    /** A quiet indigo while Do Not Disturb holds the island. */
+    get tint() {
+        return this._center.dnd ? [0.10, 0.10, 0.20] : null;
+    }
+
     /** How many there are, then Do Not Disturb and Clear All as small round buttons. */
     _buildBar() {
         const bar = new St.BoxLayout({style_class: 'isle-notifications-bar'});
@@ -81,11 +88,49 @@ class NotificationsPage extends Page {
             this._center.dnd = !this._center.dnd;
         }, {size: 13, accessibleName: 'Do Not Disturb'});
         this._dndButton.y_align = Clutter.ActorAlign.CENTER;
+        // A split button: the moon turns it on or off, the chevron offers a timed one.
+        this._dndMore = iconButton('isle-chevron-down-symbolic', 'isle-button-flat isle-dnd-more',
+            () => this._toggleDndChoices(), {size: 9, accessibleName: 'Do Not Disturb for a while'});
+        this._dndMore.y_align = Clutter.ActorAlign.CENTER;
         this._clearButton = pillButton('Clear', 'isle-pill-small isle-notifications-clear', () => this._center.clearAll());
         this._clearButton.y_align = Clutter.ActorAlign.CENTER;
         bar.add_child(this._dndButton);
+        bar.add_child(this._dndMore);
         bar.add_child(this._clearButton);
         return bar;
+    }
+
+    /** "For 30 minutes · 1 hour · Until tomorrow", and Off while it is on. */
+    _buildDndChoices() {
+        this._dndChoices = new St.BoxLayout({style_class: 'isle-dnd-choices', visible: false});
+        for (const [text, minutes] of [['30 min', 30], ['1 hour', 60], ['Tomorrow', null]]) {
+            const chip = pillButton(text, 'isle-pill-small isle-dnd-choice', () => {
+                if (minutes === null)
+                    this._center.setDndUntilTomorrow();
+                else
+                    this._center.setDndFor(minutes);
+                this._showDndChoices(false);
+            });
+            this._dndChoices.add_child(chip);
+        }
+        this._dndOff = pillButton('Off', 'isle-pill-small isle-dnd-choice', () => {
+            this._center.setDndFor(0);
+            this._showDndChoices(false);
+        });
+        this._dndChoices.add_child(this._dndOff);
+        return this._dndChoices;
+    }
+
+    /** Opens or closes the timed choices, and closes them by themselves after a moment. */
+    _toggleDndChoices() {
+        this._showDndChoices(!this._dndChoices.visible);
+    }
+
+    _showDndChoices(shown) {
+        this._dndChoices.visible = shown;
+        this.cancel('dnd-choices');
+        if (shown)
+            this.later('dnd-choices', 6000, () => this._showDndChoices(false));
     }
 
     /** While Do Not Disturb is on, what it does: a moon and a line under the heading. */
@@ -93,10 +138,10 @@ class NotificationsPage extends Page {
         this._dndNote = new St.BoxLayout({style_class: 'isle-notifications-dnd-note', visible: false});
         // Dimmed as the line beside it: the moon is drawn white, so its colour can't be set.
         this._dndNote.add_child(new St.Icon({gicon: icon('isle-moon'), icon_size: 10, opacity: 130, y_align: Clutter.ActorAlign.CENTER}));
-        const text = label('Do Not Disturb: new ones wait here; urgent ones still show', 'isle-notifications-dnd-text',
+        this._dndText = label('Do Not Disturb: new ones wait here; urgent ones still show', 'isle-notifications-dnd-text',
             {x_expand: true, y_align: Clutter.ActorAlign.CENTER});
-        text.clutter_text.ellipsize = Pango.EllipsizeMode.END;
-        this._dndNote.add_child(text);
+        this._dndText.clutter_text.ellipsize = Pango.EllipsizeMode.END;
+        this._dndNote.add_child(this._dndText);
         return this._dndNote;
     }
 
@@ -163,6 +208,15 @@ class NotificationsPage extends Page {
             this._dndButton.remove_style_pseudo_class('checked');
         setButtonIcon(this._dndButton, on ? 'isle-moon' : 'isle-bell');
         this._dndNote.visible = on;
+        const until = this._center.dndUntil;
+        const at = until ? Format.timeOfDay(GLib.DateTime.new_from_unix_local(Math.floor(until / 1000))) : '';
+        this._dndText.text = until
+            ? `Do Not Disturb until ${at}: new ones wait here; urgent ones still show`
+            : 'Do Not Disturb: new ones wait here; urgent ones still show';
+        this._dndOff.visible = on;
+        if (!on)
+            this._showDndChoices(false);
+        this.emit('tint-changed');
     }
 
     /** A row: the app's icon, who and what on one line, and when; under the pointer, its buttons and ×. */

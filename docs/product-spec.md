@@ -51,6 +51,12 @@ Type is set in Inter (installed with Isle), semibold for titles, nothing heavier
 tracking on large figures. The island's text fields keep their own look
 when Blur my Shell restyles the shell's.
 
+The black is not flat: a faint sheen rises from the top edge and a 1 px
+hairline rims the shape, so it reads as a lit object. Pages may wash it in
+their own colour, always quietly: the cover behind the lyrics, a cool grey
+while focusing, green on a break, a deep red on the Calendar and indigo while
+Do Not Disturb holds the Notifications page.
+
 A slider takes the bar from glass to black; the island stays black. All
 the way to black, bar and island read as one shape: the shoulders then curve
 out of the bar's lower edge instead of the screen's top. The installer sets glass (and the slim
@@ -105,6 +111,8 @@ place, dimmed, so the layout never jumps.
 | Two-finger swipe up / down on an alert | Put it away / open it | – |
 | Super+V (GNOME's calendar shortcut) | Open the clipboard history, search ready, held open (Settings may leave it to GNOME's calendar) | Close |
 | Super+I (Settings: any shortcut) | Ask the assistant; typing while it listens types the request instead | Speak again |
+| Super+K (Settings: any shortcut) | Open the command surface | Close |
+| Super+Alt+V (Settings: any shortcut) | Paste the next stacked copy; with none, open the Shelf gathering | – |
 | Click a tab | – | Go to that page |
 | Two-finger swipe sideways | – | Previous / next page, one page a swipe |
 | Scroll up / down | – | Lists and lyrics scroll; elsewhere previous / next page, one a wheel click |
@@ -122,6 +130,16 @@ Pages, in order: **Call** (only during a call) **· Music · Notifications ·
 Focus · Reminders · Shelf · Calendar · Usage** (Usage only with an AI plan
 found) **· Devices**, one tab each in the header. Lists scroll with the wheel
 or touchpad and never show a scrollbar.
+
+**Command surface** (Super+K): the island grows into a 600 px panel with one
+field. With nothing typed it is a launcher: the pages and the actions (start
+or pause focus, Do Not Disturb for an hour, play/pause, next song, join the
+next meeting, open Settings, the clipboard, the calendar, notifications).
+Typing narrows it and adds the clipboard, reminders, today's events and
+installed apps; a line at the top offers to add the words as a task, an event
+on today, or to ask the assistant. ↑ ↓ choose, Enter runs, Esc closes; the
+field takes the keyboard, and a click outside or Esc puts it away. Records
+and apps show only once there is a word, so the empty surface stays short.
 
 ## 4. Closed island
 
@@ -160,7 +178,9 @@ or touchpad and never show a scrollbar.
 Every page shares the header row inside the top bar. On
 the left, a tab per page: icons, the open page's in a lit pill with its
 name, and a red dot on Notifications while some are unseen. On the right a
-red "● 0:42" pill while the screen records (click to stop), a green "📞 1:15"
+red "● 0:42" pill while the screen records (click to stop), a blue
+"Join · 14:00" pill from ten minutes before the next event with a meeting
+link and while it runs (click: join), a green "📞 1:15"
 pill during a call on any page but Call (click: the Call page), the privacy
 dots, the music bars, the assistant's sparkle, `[timer ring] Tue 20 Oct 12:26` and the gear. The
 tabs' icons, the gear and the pages' contents share the same 28 px edges. The Call tab, its
@@ -227,7 +247,8 @@ videos), the song is shown playing for up to 1.5 s, so the cover, bars and
 width do not drop out and back; a song paused by itself shows at once.
 
 **Notifications**, as a plain list: a heading "Notifications" with
-**Do Not Disturb** (a bell, or a moon on purple while on) and a **Clear**
+**Do Not Disturb** (a bell, or a moon on purple while on), a chevron beside it
+for **30 min · 1 hour · Tomorrow · Off**, and a **Clear**
 pill on its right. Below, newest first, one line each: the app's icon (a
 symbolic one on a grey tile), the title in bold and its text in grey, and
 how long ago on the right; under the pointer the row lights and its buttons
@@ -239,10 +260,16 @@ it (the island closes). Opening the page marks them seen. Empty: a bell,
 runs (white while focusing, green on a break), the time left inside and the
 phase under it ("Focus", "Short break", "Long break"). In the middle two
 stepper pills, **Work** and **Break**, each with its minutes and − / +
-(Work 1–180, Break 1–60; each click counts, however fast). On the right a
-**Start** pill (Pause while it runs, Resume when paused) with a round reset
-beside it once the timer has started; the controls keep a fixed width, so
-nothing moves as they change. No glows.
+(Work 1–180, Break 1–60; each click counts, however fast). Under them,
+"3 sessions · 1h 15m today" with the last seven days as seven small bars
+(three to twelve pixels, dimmer when shorter), then "Next: Design review ·
+12m" with **Join** in the last ten minutes. A reminder can be the session's
+task: its ▶ on the Reminders page starts focus and shows "Focusing on “…”"
+with **Done**, which ticks it off. On the right a **Start** pill (Pause while
+it runs, Resume when paused) with a round reset beside it once the timer has
+started; the controls keep a fixed width, so nothing moves as they change.
+The page washes the island in a cool grey while focusing and a quiet green on
+a break. No glows.
 
 While a focus phase runs (paused included), Do Not Disturb is on, like a
 Focus mode; it goes off when the phase ends. Isle only undoes what it did:
@@ -260,13 +287,21 @@ segmented control (switching crossfades).
   (thumbnail with its size) and files (icon, name, "+2 more"). Each card shows
   the app it came from and how long ago. Click a card to copy it ("Copied"
   flashes on it). On hover: pin (pinned items stay at the front and are
-  never cleared), a hand-off (text to Reminders; images and files to the Files
-  tab) and ×. The bar holds type filters (text, links,
-  images, files; the chosen one lit, the others dimmed), search (a round
-  button that opens into a field, closing again when left empty) and
-  Clear all (asks once more; pinned items are kept). Opened with Super+V, the search
-  field has the keyboard: ← → choose a card (white outline), Enter pastes it
-  into the window in front (Ctrl+Shift+V in terminals).
+  never cleared), open a link or show a file in Files, a hand-off (text to
+  Reminders; images and files to the Files tab) and ×. The bar holds type
+  filters (text, links, images, files; the chosen one lit, the others
+  dimmed), a **Stack** pill, search (a round button that opens into a field,
+  closing again when left empty) and Clear all (asks once more; pinned items
+  are kept). Opened with Super+V, the search field has the keyboard: ← →
+  choose a card (white outline), Enter pastes it into the window in front
+  (Ctrl+Shift+V in terminals). The search understands `from:chrome`,
+  `type:image|link|text|files` and `before:today|yesterday|7d|2026-10-20`
+  beside plain words.
+  **Stack** gathers cards: each click checks one, a check shows on its
+  corner, and the bar says "Stack 3 · paste in order" with **Paste next**
+  and **Done**. Paste next (or Super+Alt+V anywhere) copies the first and
+  types it into the window in front, then moves to the next; a copy that
+  fails stays in the stack.
 - **Files**: at most 6 files, all in view with no scrolling; a seventh is
   refused until one is removed. Each file is a tile of one size: a 52 px
   square preview (a picture cut to a square, or the file's icon) with a
@@ -296,10 +331,12 @@ segmented control (switching crossfades).
 Clipboard history is event driven (GNOME tells the shell when the
 clipboard changes; nothing polls) and kept by `isled`: the 20 most recent
 items plus up to 10 pinned ones ("Pins full · unpin one" past that), images
-with a 320 × 200 thumbnail. The cards are only
-drawn while the page is open, so copying costs nothing on screen. Copies are never kept
-when a password manager marks them secret, from ignored apps (password
-managers by default; Settings → Clipboard), or while history is off.
+with a 320 × 200 thumbnail. Settings → Clipboard can drop unpinned items
+after 1, 7, 30 or 90 days, or keep them until newer copies push them out.
+The cards are only drawn while the page is open, so copying costs nothing on
+screen. Copies are never kept when a password manager marks them secret,
+from ignored apps (password managers by default; Settings → Clipboard), or
+while history is off.
 
 **Reminders** (a page of its own, the island's full width), in dark mode:
 an orange "Reminders" with the number still open on the right
@@ -309,7 +346,8 @@ many lines as it needs, the ring by its first line), scrolling past what
 fits, and a
 last faint row "New Reminder" (Enter adds and stays ready, Esc stops; + puts
 the cursor there). Clicking the title renames it in place (Enter or clicking
-away saves, Esc cancels); × appears on hover. Ticking one fills its ring
+away saves, Esc cancels); ▶ and × appear on hover, ▶ starting a focus
+session on it. Ticking one fills its ring
 with an orange dot and strikes the title through at once; it lingers 0.9 s
 (a second tap undoes it), then fades and folds away, the rows below sliding
 up. Closing the island in that moment keeps it done. Empty: "No Reminders",
@@ -477,12 +515,17 @@ opens the clipboard history instead of the drop-down). Rules
 match GNOME's: low-urgency and already-seen notifications never pop up, and
 apps whose banners are turned off in Settings stay quiet. Do Not Disturb is
 GNOME's own setting, so it stays in sync with Quick Settings; while it is on,
-only critical notifications pop up, and a line under the heading says so. Clicking a notification alert opens it;
-hovering opens the Notifications page.
+only critical notifications pop up, and a line under the heading says so.
+The chevron turns it on for 30 minutes, an hour or until tomorrow at 9:00,
+or off; the line says "until 14:30". A timed one is remembered across the
+lock screen and a restart, and Isle turns it off at its end only if it was
+Isle that turned it on (a focus session's claim is respected too). Clicking a
+notification alert opens it; hovering opens the Notifications page.
 
 ## 7. Data and reliability
 
-- Reminders, shelf, clipboard history (images in `clips/`) and timer settings
+- Reminders, shelf, clipboard history (images in `clips/`), timer settings
+  and the last 30 days of focus figures (`focus-history.json`)
   live in `~/.local/share/isle/*.json`,
   written atomically and flushed to disk (file and folder), so they survive
   reboots and power cuts. A corrupt file is set aside, never lost silently.

@@ -68,8 +68,12 @@ const alarmed = new Set();
 
 // Signals: `event-soon` (json): an event with a time starts in `alarmLead` minutes, {id, title, start_ms,
 // end_ms}; `id` is GNOME's (source, event and recurrence, a line each), null for one of Isle's own.
+// `next-event` (json): the next event with a time today or tomorrow, or '' when there is none.
 export const CalendarPage = GObject.registerClass({
-    Signals: {'event-soon': {param_types: [GObject.TYPE_STRING]}},
+    Signals: {
+        'event-soon': {param_types: [GObject.TYPE_STRING]},
+        'next-event': {param_types: [GObject.TYPE_STRING]},
+    },
 }, class CalendarPage extends Page {
     /** Month on the left, the day's events on the right; follows isled's own events. */
     _init(daemon, {height}) {
@@ -117,6 +121,11 @@ export const CalendarPage = GObject.registerClass({
         }, {now: false});
     }
 
+    /** A quiet red wash, as the page's own accents. */
+    get tint() {
+        return [0.10, 0.035, 0.035];
+    }
+
     /** Whether the page shows GNOME's World Clocks (only while it has cities). */
     set worldClocks(enabled) {
         this._worldEnabled = enabled;
@@ -151,6 +160,7 @@ export const CalendarPage = GObject.registerClass({
     /** Waits for the next event with a time (today or tomorrow), to emit `event-soon` `alarmLead` before it. */
     _scheduleAlarm() {
         this.cancel('alarm');
+        this._syncNextEvent();
         if (!this._alarmLeadMs)
             return;
         const now = Date.now();
@@ -182,6 +192,46 @@ export const CalendarPage = GObject.registerClass({
             }
             this._scheduleAlarm();
         }, {keep: true});
+    }
+
+    /** Asks again for the next event, as the meeting pill's countdown does each minute. */
+    refreshNextEvent() {
+        this._syncNextEvent();
+    }
+
+    /** Today's events, for the command surface: `{title, start, end, allDay}`. */
+    todayEvents() {
+        this._bindSource();
+        return this._eventsOn(startOfDay(new Date())).map(event => ({
+            title: event.title,
+            start: event.start.getTime(),
+            end: event.end?.getTime() ?? null,
+            allDay: event.allDay,
+        }));
+    }
+
+    /** Emits `next-event` when the next timed event today or tomorrow changes (or ends). */
+    _syncNextEvent() {
+        const now = Date.now();
+        const today = startOfDay(new Date());
+        const next = [...this._eventsOn(today), ...this._eventsOn(addDays(today, 1))]
+            .filter(event => {
+                if (event.allDay)
+                    return false;
+                const end = event.end?.getTime() ?? event.start.getTime() + 60 * 60 * 1000;
+                return end > now;
+            })
+            .sort((a, b) => a.start - b.start)[0] ?? null;
+        const json = next ? JSON.stringify({
+            id: next.id,
+            title: next.title,
+            start_ms: next.start.getTime(),
+            end_ms: next.end?.getTime() ?? null,
+        }) : '';
+        if (json === this._nextEventJson)
+            return;
+        this._nextEventJson = json;
+        this.emit('next-event', json);
     }
 
     // Building

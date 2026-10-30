@@ -84,6 +84,12 @@ export const ShelfPage = GObject.registerClass({
 
         this._clips = new ClipsView(daemon);
         this._clips.connect('activated', (_view, item, paste) => this._onActivated(item, paste));
+        // Gathering a paste stack: a click chooses a card instead of copying it.
+        this._clips.connect('stack-toggled', (_view, item) => this._toggleStackItem(item));
+        this._stackMode = false;
+        /** The ids gathered for the paste stack, in the order they paste. */
+        this._stack = [];
+        this._searchOpen = false;
         this._thumbnails = new Thumbnails();
         this._files = new FilesView(daemon, this._thumbnails);
         // The helper window must match the tab exactly, so it follows every
@@ -139,7 +145,8 @@ export const ShelfPage = GObject.registerClass({
         // Clipboard: type filters, search (a button that opens into a field)
         // and Clear all.
         this._clipboardControls = new St.BoxLayout({style_class: 'isle-shelf-controls', x_expand: true});
-        const filters = new St.BoxLayout({style_class: 'isle-segmented isle-segmented-icons'});
+        this._filters = new St.BoxLayout({style_class: 'isle-segmented isle-segmented-icons'});
+        const filters = this._filters;
         this._filterButtons = new Map();
         for (const filter of FILTERS) {
             const button = new St.Button({
@@ -153,6 +160,10 @@ export const ShelfPage = GObject.registerClass({
             filters.add_child(button);
         }
         this._clipboardControls.add_child(filters);
+        this._stackButton = pillButton('Stack', 'isle-pill-small isle-shelf-stack',
+            () => this._setStackMode(true));
+        this._stackButton.y_align = Clutter.ActorAlign.CENTER;
+        this._clipboardControls.add_child(this._stackButton);
 
         this._search = new St.Entry({style_class: 'isle-entry isle-shelf-field', hint_text: 'Search', can_focus: true, x_expand: true});
         this._search.set_primary_icon(new St.Icon({gicon: icon('isle-search'), icon_size: 12, style_class: 'isle-shelf-field-icon'}));
@@ -190,6 +201,20 @@ export const ShelfPage = GObject.registerClass({
         this._confirm.hide();
         this._clipboardControls.add_child(this._clear);
         this._clipboardControls.add_child(this._confirm);
+
+        // Stack mode: what is gathered, and the one action that matters.
+        this._stackBar = new St.BoxLayout({style_class: 'isle-shelf-stack-bar', x_expand: true, visible: false});
+        this._stackLabel = label('', 'isle-shelf-stack-label', {x_expand: true, y_align: Clutter.ActorAlign.CENTER});
+        this._pasteNext = pillButton('Paste next', 'isle-pill-small isle-shelf-paste-next',
+            () => this.pasteNext());
+        this._pasteNext.y_align = Clutter.ActorAlign.CENTER;
+        this._stackDone = pillButton('Done', 'isle-pill-small isle-shelf-stack-done',
+            () => this._setStackMode(false));
+        this._stackDone.y_align = Clutter.ActorAlign.CENTER;
+        this._stackBar.add_child(this._stackLabel);
+        this._stackBar.add_child(this._pasteNext);
+        this._stackBar.add_child(this._stackDone);
+        this._clipboardControls.add_child(this._stackBar);
         bar.add_child(this._clipboardControls);
 
         // Files: what the tab is for.
@@ -202,10 +227,92 @@ export const ShelfPage = GObject.registerClass({
         return bar;
     }
 
+    // Paste stack
+
+    /** Gathers cards into a stack, or leaves it: clicking a card then chooses it rather than copying it. */
+    _setStackMode(on) {
+        this._stackMode = Boolean(on);
+        this._clips.stackMode = this._stackMode;
+        if (this._stackMode) {
+            this._closeSearch();
+            this.emit('request-keyboard', false);
+        }
+        this._syncStackBar();
+    }
+
+    /** Shows the stack's controls in place of the filters and search, with how many are gathered. */
+    _syncStackBar() {
+        const stacking = this._stackMode;
+        this._filters.visible = !stacking;
+        this._stackButton.visible = !stacking;
+        this._stackButton.label = this._stack.length ? `Stack ${this._stack.length}` : 'Stack';
+        this._clear.visible = !stacking;
+        this._confirm.visible = false;
+        this._search.visible = !stacking && this._searchOpen;
+        this._searchSpacer.visible = !stacking && !this._searchOpen;
+        this._searchButton.visible = !stacking && !this._searchOpen;
+        this._stackBar.visible = stacking;
+        this._stackLabel.text = this._stack.length
+            ? `Stack ${this._stack.length} · paste in order`
+            : 'Click cards to gather them';
+        this._pasteNext.visible = this._stack.length > 0;
+        this._stackDone.visible = true;
+        this._clips.stack = this._stack;
+    }
+
+    /** Adds a card to the stack, or takes it out again. */
+    _toggleStackItem(item) {
+        const index = this._stack.indexOf(item.id);
+        if (index >= 0)
+            this._stack.splice(index, 1);
+        else
+            this._stack.push(item.id);
+        this._syncStackBar();
+    }
+
+    /** Opens the Clipboard tab ready to gather a stack (the shortcut, with nothing gathered yet). */
+    enterStack() {
+        this.showTab('clipboard');
+        this._setStackMode(true);
+    }
+
+    /** Leaves stack mode, keeping what was gathered for the next paste. */
+    leaveStack() {
+        if (this._stackMode)
+            this._setStackMode(false);
+    }
+
+    /** Pastes the next stacked item into the window in front. False when the stack is empty. */
+    pasteNext() {
+        while (this._stack.length) {
+            const id = this._stack[0];
+            const item = (this.daemon.state.clipboard ?? []).find(clip => clip.id === id);
+            if (!item) {
+                this._stack.shift();
+                this._syncStackBar();
+                continue;
+            }
+            // The island gets out of the way, then the keys land in the app. It leaves the stack once
+            // the copy worked, so a failure does not lose it.
+            this.emit('request-close');
+            this._history.copy(item, {touch: true}).then(copied => {
+                if (!copied || this._destroyed)
+                    return;
+                this._stack.shift();
+                this._syncStackBar();
+                this._history.paste();
+            });
+            return true;
+        }
+        this._syncStackBar();
+        return false;
+    }
+
     // Search
 
     /** Opens the search field in place of its button, ready to type. */
     _openSearch() {
+        this._searchOpen = true;
         this._searchSpacer.hide();
         this._searchButton.hide();
         this._search.show();
@@ -215,6 +322,7 @@ export const ShelfPage = GObject.registerClass({
 
     /** Puts the search button back in place of the field. */
     _closeSearch() {
+        this._searchOpen = false;
         this._search.hide();
         this._searchSpacer.show();
         this._searchButton.show();
@@ -260,6 +368,8 @@ export const ShelfPage = GObject.registerClass({
         if (name === 'files')
             this.emit('request-keyboard', false);
         if (focusSearch) {
+            if (this._stackMode)
+                this._setStackMode(false);
             this._search.text = '';
             this._openSearch();
         }

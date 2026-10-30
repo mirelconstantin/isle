@@ -316,6 +316,55 @@ impl FocusStats {
     }
 }
 
+/// The last few days' focus, newest last: enough for the week's little bars on the Focus page.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FocusHistory {
+    pub days: Vec<FocusDay>,
+}
+
+/// Focus completed on one day.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FocusDay {
+    /// Local date, e.g. "2026-10-20".
+    pub date: String,
+    pub sessions: u32,
+    pub focus_ms: i64,
+}
+
+/// Days kept: a month is enough for a week's bars and a streak, and stays small.
+pub const FOCUS_HISTORY_DAYS: usize = 30;
+
+impl FocusHistory {
+    /// Adds a completed session to `today`, keeping at most [`FOCUS_HISTORY_DAYS`] days.
+    pub fn record(&mut self, today: &str, focus_ms: i64) {
+        match self.days.iter_mut().find(|day| day.date == today) {
+            Some(day) => {
+                day.sessions += 1;
+                day.focus_ms += focus_ms.max(0);
+            }
+            None => self.days.push(FocusDay {
+                date: today.to_owned(),
+                sessions: 1,
+                focus_ms: focus_ms.max(0),
+            }),
+        }
+        // Sorted by date, so an out-of-order record (a clock change) still trims the oldest.
+        self.days.sort_by(|a, b| a.date.cmp(&b.date));
+        if self.days.len() > FOCUS_HISTORY_DAYS {
+            let excess = self.days.len() - FOCUS_HISTORY_DAYS;
+            self.days.drain(..excess);
+        }
+    }
+
+    /// The last `count` days, oldest first.
+    pub fn recent(&self, count: usize) -> Vec<FocusDay> {
+        let start = self.days.len().saturating_sub(count);
+        self.days[start..].to_vec()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -465,5 +514,32 @@ mod tests {
         assert_eq!(stats.on("2026-10-21"), (0, 0));
         stats.record("2026-10-21", 10 * MINUTE_MS);
         assert_eq!(stats.on("2026-10-21"), (1, 10 * MINUTE_MS));
+    }
+
+    #[test]
+    fn focus_history_adds_days_and_keeps_the_newest() {
+        let mut history = FocusHistory::default();
+        history.record("2026-10-20", 25 * MINUTE_MS);
+        history.record("2026-10-20", 5 * MINUTE_MS);
+        history.record("2026-10-21", 10 * MINUTE_MS);
+        assert_eq!(history.days.len(), 2);
+        assert_eq!(history.days[0].sessions, 2);
+        assert_eq!(history.days[0].focus_ms, 30 * MINUTE_MS);
+        assert_eq!(
+            history.recent(1),
+            vec![FocusDay {
+                date: "2026-10-21".into(),
+                sessions: 1,
+                focus_ms: 10 * MINUTE_MS,
+            }]
+        );
+
+        // A clock change that records an older day keeps the list sorted, and only the newest stay.
+        history.record("2026-01-01", MINUTE_MS);
+        for day in 1..=FOCUS_HISTORY_DAYS {
+            history.record(&format!("2027-01-{day:02}"), MINUTE_MS);
+        }
+        assert_eq!(history.days.len(), FOCUS_HISTORY_DAYS);
+        assert_eq!(history.days.last().unwrap().date, "2027-01-30");
     }
 }

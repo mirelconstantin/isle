@@ -12,6 +12,7 @@ import Pango from 'gi://Pango';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 
+import {parseQuery} from '../clipboardQuery.js';
 import {VERTICAL} from '../compat.js';
 import * as Format from '../format.js';
 import {icon, iconButton, label, wrapLines} from '../widgets.js';
@@ -42,19 +43,31 @@ function hostOf(url) {
     }
 }
 
-/** Whether `item` matches the search `query` (already lower case): its app's name or what the card shows, or,
- * as isled found (`found`, ids), any of its text. */
-function matches(item, query, found) {
+/** Whether `item` matches the search: its app, what the card shows, or any of its text (`found`, ids),
+ * narrowed by the `from:`, `type:` and `before:` operators. */
+function matches(item, query, found, ops) {
+    if (ops.kind && item.kind !== ops.kind)
+        return false;
+    if (ops.before && item.at_ms >= ops.before)
+        return false;
+    if (ops.app) {
+        const app = appFor(item.app_id);
+        const name = `${item.app_id ?? ''}\n${app?.get_name() ?? ''}`.toLowerCase();
+        if (!name.includes(ops.app))
+            return false;
+    }
     if (!query || found?.has(item.id))
         return true;
     const app = appFor(item.app_id)?.get_name() ?? '';
     return `${item.preview}\n${app}`.toLowerCase().includes(query);
 }
 
-/** Signals: `activated` (item, paste): a card was chosen; `paste` when by keyboard. */
+/** Signals: `activated` (item, paste): a card was chosen; `paste` when by keyboard; `stack-toggled`
+ * (item): the card was clicked while the stack was gathering. */
 export const ClipsView = GObject.registerClass({
     Signals: {
         'activated': {param_types: [GObject.TYPE_JSOBJECT, GObject.TYPE_BOOLEAN]},
+        'stack-toggled': {param_types: [GObject.TYPE_JSOBJECT]},
     },
 }, class ClipsView extends St.Widget {
     /** A sideways strip of cards, with an empty state in its place when none match. */
@@ -82,6 +95,12 @@ export const ClipsView = GObject.registerClass({
         this._cards = new Map();
         /** A card's "Copied" (or similar), kept across redraws while it shows. */
         this._flashing = null;
+        /** The search's `from:`, `type:` and `before:` parts. */
+        this._ops = {app: '', kind: '', before: 0};
+        /** While gathering a paste stack, a click chooses a card instead of copying it. */
+        this._stackMode = false;
+        /** Ids gathered in the paste stack, in the order they will paste. */
+        this._stack = new Set();
 
         this._strip = new St.BoxLayout({style_class: 'isle-clips'});
         this._scroll = new St.ScrollView({
@@ -127,12 +146,15 @@ export const ClipsView = GObject.registerClass({
         this._filter();
     }
 
-    /** The search box's words; isled searches the items' whole text. */
-    set query(query) {
-        query = query.trim().toLowerCase();
-        if (query === this._query && !this._searching)
+    /** The search box's words and operators; isled searches the items' whole text for the words. */
+    set query(raw) {
+        const ops = parseQuery(raw);
+        this._ops = ops;
+        if (ops.terms === this._query && !this._searching) {
+            this._filter();
             return;
-        this._search(query, {reset: true});
+        }
+        this._search(ops.terms, {reset: true});
     }
 
     /** Empties the search without showing the cards it hid yet: the next `update` does. */
@@ -141,7 +163,20 @@ export const ClipsView = GObject.registerClass({
         this._searching = null;
         this._query = '';
         this._found = null;
+        this._ops = {app: '', kind: '', before: 0};
         this._selected = 0;
+    }
+
+    /** Whether a card is in the paste stack. */
+    set stack(ids) {
+        this._stack = new Set(ids);
+        this._syncStack();
+    }
+
+    /** While gathering a stack, clicking a card chooses it rather than copying it. */
+    set stackMode(on) {
+        this._stackMode = Boolean(on);
+        this._syncStack();
     }
 
     // Asks isled which items hold `query` in their whole text. The cards change once it answers, from the last
@@ -210,7 +245,7 @@ export const ClipsView = GObject.registerClass({
     _filter() {
         const items = this._all
             .filter(item => !this._kind || item.kind === this._kind)
-            .filter(item => matches(item, this._query, this._found));
+            .filter(item => matches(item, this._query, this._found, this._ops));
         this._shown = items.slice(0, MAX_CARDS);
         this._selected = Math.min(this._selected, Math.max(0, this._shown.length - 1));
         const ids = new Set(this._shown.map(item => item.id));
@@ -259,6 +294,7 @@ export const ClipsView = GObject.registerClass({
             count--;
         }
         this._syncSelection();
+        this._syncStack();
     }
 
     /** Stops drawing the rest of the cards in idle time. */
@@ -270,7 +306,7 @@ export const ClipsView = GObject.registerClass({
 
     /** Why there are no cards: shared screen, no match, history off, or nothing yet. */
     _updateEmpty() {
-        const searching = this._query || this._kind;
+        const searching = this._query || this._kind || this._ops.app || this._ops.kind || this._ops.before;
         if (this._hidden) {
             this._emptyIcon.gicon = icon('isle-clipboard');
             this._emptyTitle.text = 'Hidden while you share your screen';
@@ -328,8 +364,24 @@ export const ClipsView = GObject.registerClass({
             return;
         }
         const item = this._shown[this._selected];
-        if (item)
+        if (!item)
+            return;
+        if (this._stackMode)
+            this.emit('stack-toggled', item);
+        else
             this.emit('activated', item, true);
+    }
+
+    /** The check on each card gathered in the paste stack. */
+    _syncStack() {
+        for (const [id, card] of this._cards) {
+            const stacked = this._stack.has(id);
+            card._stackBadge.visible = stacked;
+            if (stacked)
+                card.add_style_class_name('stacked');
+            else
+                card.remove_style_class_name('stacked');
+        }
     }
 
     /** Marks the selected card, only while the keyboard is in use. */
@@ -387,6 +439,17 @@ export const ClipsView = GObject.registerClass({
         const actions = this._actions(item, card);
         card.add_child(actions);
         card.add_child(this._header(item, card));
+        // Gathered in the paste stack: a white check at the card's corner.
+        card._stackBadge = new St.Bin({
+            style_class: 'isle-clip-stack',
+            child: new St.Icon({gicon: icon('isle-check-symbolic'), icon_size: 10}),
+            x_expand: true,
+            y_expand: true,
+            x_align: Clutter.ActorAlign.END,
+            y_align: Clutter.ActorAlign.END,
+            visible: false,
+        });
+        card.add_child(card._stackBadge);
 
         const feedback = new St.BoxLayout({
             style_class: 'isle-clip-feedback',
@@ -410,7 +473,10 @@ export const ClipsView = GObject.registerClass({
                 return Clutter.EVENT_PROPAGATE;
             this._selected = this._shown.findIndex(shown => shown.id === item.id);
             this._syncSelection();
-            this.emit('activated', item, false);
+            if (this._stackMode)
+                this.emit('stack-toggled', item);
+            else
+                this.emit('activated', item, false);
             return Clutter.EVENT_STOP;
         });
         card._item = item;
@@ -582,6 +648,30 @@ export const ClipsView = GObject.registerClass({
                 if (!item.pinned)
                     this.flash(item, 'isle-pin-fill', 'Pinned');
             }));
+
+        // The one thing a link or a file is for, without copying it first.
+        if (item.kind === 'link') {
+            actions.add_child(button('isle-open-symbolic', 'Open link', async () => {
+                try {
+                    // The preview may cut a long address; the full text is the link.
+                    const result = await this._daemon.call('clipboard', 'GetText', item.id);
+                    const url = result?.[0] ?? item.preview.trim();
+                    Gio.AppInfo.launch_default_for_uri(url, global.create_app_launch_context(0, -1));
+                } catch (e) {
+                    console.warn(`Isle: could not open the link: ${e.message}`);
+                }
+            }));
+        } else if (item.kind === 'files' && item.uris?.length) {
+            actions.add_child(button('isle-open-symbolic', 'Show in Files', () => {
+                try {
+                    const [path] = GLib.filename_from_uri(item.uris[0]);
+                    const folder = GLib.path_get_dirname(path);
+                    Gio.AppInfo.launch_default_for_uri(GLib.filename_to_uri(folder, null), global.create_app_launch_context(0, -1));
+                } catch (e) {
+                    console.warn(`Isle: could not show the file: ${e.message}`);
+                }
+            }));
+        }
 
         if (item.kind === 'image' || item.kind === 'files') {
             actions.add_child(button('isle-shelf', 'Add to the Files tab', () => {

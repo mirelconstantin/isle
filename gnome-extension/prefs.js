@@ -288,6 +288,14 @@ export default class IslePreferences extends ExtensionPreferences {
         });
         history.add(switchRow(settings, 'clipboard-history', 'Keep clipboard history',
             'Text, links, images and files you copy. Passwords from password managers are never kept.'));
+        history.add(intChoiceRow(settings, 'clipboard-retention-days', 'Keep copies for',
+            'Pinned items are always kept', [
+                [0, 'Until newer copies push them out'],
+                [1, '1 day'],
+                [7, '7 days'],
+                [30, '30 days'],
+                [90, '90 days'],
+            ]));
         const clear = new Adw.ActionRow({title: 'Clear history', subtitle: 'Pinned items are kept'});
         const clearButton = new Gtk.Button({label: 'Clear…', valign: Gtk.Align.CENTER});
         clearButton.connect('clicked', () => confirmClear(window));
@@ -335,6 +343,16 @@ export default class IslePreferences extends ExtensionPreferences {
         page.add(look);
         page.add(pagesGroup(settings, window));
         page.add(worldClocksGroup(settings, window));
+
+        const shortcuts = new Adw.PreferencesGroup({
+            title: 'Shortcuts',
+            description: 'These work anywhere on the desktop.',
+        });
+        shortcuts.add(shortcutRow(settings, 'command-shortcut', 'Command surface',
+            'Search pages, actions, clips, reminders, events and apps; type to add'));
+        shortcuts.add(shortcutRow(settings, 'clipboard-stack-shortcut', 'Paste the next stacked copy',
+            'Paste the next item gathered in the Shelf’s stack'));
+        page.add(shortcuts);
 
         const alerts = new Adw.PreferencesGroup({title: 'Alerts'});
         // On: in the island; off: left to GNOME's own banners (`gnome-banners`).
@@ -1130,6 +1148,28 @@ function choiceRow(settings, key, title, subtitle, choices) {
         const value = choices[row.selected]?.[0];
         if (value !== undefined && value !== settings.get_string(key))
             settings.set_string(key, value);
+    });
+    row.connect('destroy', () => settings.disconnect(changed));
+    return row;
+}
+
+/** A drop-down for an int key with `choices`: [[value, label], …]. */
+function intChoiceRow(settings, key, title, subtitle, choices) {
+    const row = new Adw.ComboRow({
+        title,
+        subtitle,
+        model: Gtk.StringList.new(choices.map(([, label]) => label)),
+    });
+    const sync = () => {
+        const index = choices.findIndex(([value]) => value === settings.get_int(key));
+        row.selected = Math.max(0, index);
+    };
+    sync();
+    const changed = settings.connect(`changed::${key}`, sync);
+    row.connect('notify::selected', () => {
+        const value = choices[row.selected]?.[0];
+        if (value !== undefined && value !== settings.get_int(key))
+            settings.set_int(key, value);
     });
     row.connect('destroy', () => settings.disconnect(changed));
     return row;

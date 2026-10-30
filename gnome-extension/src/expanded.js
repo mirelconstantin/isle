@@ -36,6 +36,8 @@ const TABS = {
     usage: {icon: 'isle-gauge', label: 'Usage'},
     devices: {icon: 'isle-bluetooth-symbolic', label: 'Devices'},
 };
+/** The tabs' names and icons, for the command surface. */
+export const PAGE_TABS = TABS;
 /** How bright a tab's icon is: open, under the pointer, otherwise. */
 const TAB_OPACITY = {open: 255, hover: 230, idle: 140};
 /** The settings icon's, as bright as the sparkle's colour (0.6) beside it. */
@@ -70,6 +72,8 @@ export const ExpandedView = GObject.registerClass({
         'voice-requested': {},
         // The gear by the clock: Isle's settings.
         'settings-requested': {},
+        // The meeting pill: open its link.
+        'meeting-requested': {param_types: [GObject.TYPE_STRING]},
     },
 }, class ExpandedView extends St.BoxLayout {
     /** `privacy` and `call` feed the header's status; `pages` are built by the island, in tab order. */
@@ -164,6 +168,23 @@ export const ExpandedView = GObject.registerClass({
             y_align: Clutter.ActorAlign.CENTER,
         });
         this._recordingButton.connect('clicked', () => this._privacy.stopRecording());
+        // The next meeting, from ten minutes before until it ends; its width is kept so the clock never moves.
+        const meetingBox = new St.BoxLayout({style_class: 'isle-meeting-pill-box'});
+        meetingBox.add_child(new St.Icon({gicon: icon('isle-video-symbolic'), icon_size: 13, y_align: Clutter.ActorAlign.CENTER}));
+        this._meetingLabel = label('', 'isle-meeting-pill-label');
+        meetingBox.add_child(this._meetingLabel);
+        this._meetingButton = new St.Button({
+            style_class: 'isle-meeting-pill',
+            child: meetingBox,
+            accessible_name: 'Join the next meeting',
+            visible: false,
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        this._meetingButton.connect('clicked', () => {
+            if (this._meeting?.link)
+                this.emit('meeting-requested', this._meeting.link);
+        });
+        status.add_child(this._meetingButton);
         this._privacyDots = new PrivacyDots();
         this._headerBars = new Bars({height: 14});
         status.add_child(this._recordingButton);
@@ -195,6 +216,44 @@ export const ExpandedView = GObject.registerClass({
     /** Whether the voice assistant is on, to show its mic button. */
     set voiceEnabled(enabled) {
         this._micButton.visible = enabled;
+    }
+
+    /** The next meeting `{title, start_ms, end_ms, link}`, or null: a Join pill from ten minutes before. */
+    setMeeting(meeting) {
+        this._meeting = meeting;
+        this._syncMeeting();
+        this._syncWidth();
+    }
+
+    /** Shows the Join pill within ten minutes of a meeting with a link, and while it runs. */
+    _syncMeeting() {
+        const meeting = this._meeting;
+        if (!meeting?.link) {
+            if (this._meetingButton.visible)
+                this._meetingButton.visible = false;
+            return;
+        }
+        const now = Date.now();
+        const start = meeting.start_ms;
+        const end = meeting.end_ms ?? start + 60 * 60 * 1000;
+        if (now > end) {
+            if (this._meetingButton.visible)
+                this._meetingButton.visible = false;
+            return;
+        }
+        const minutes = Math.round((start - now) / 60000);
+        if (now < start && minutes > 10) {
+            if (this._meetingButton.visible)
+                this._meetingButton.visible = false;
+            return;
+        }
+        const text = now < start
+            ? `Join · ${Format.timeOfDay(GLib.DateTime.new_from_unix_local(Math.floor(start / 1000)))}`
+            : `Join · ${Math.max(1, Math.round((now - start) / 60000))}m`;
+        if (this._meetingLabel.text !== text)
+            this._meetingLabel.text = text;
+        if (!this._meetingButton.visible)
+            this._meetingButton.visible = true;
     }
 
     /** A tab per page; the open one is lit and says its name. */
@@ -560,6 +619,7 @@ export const ExpandedView = GObject.registerClass({
             this._tickRecording();
         else
             this._stopRecordingTick();
+        this._syncMeeting();
         this._syncWidth();
     }
 

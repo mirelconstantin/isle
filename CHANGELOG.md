@@ -10,6 +10,24 @@ All notable changes to Isle are listed here. The format follows
 
 - A Devices page listing the Bluetooth devices connected now, each with the battery it reports
   ("No battery" for one that reports none, as many phones do).
+- A command surface on Super+K: one field over the island's pages, actions, clipboard, reminders,
+  today's events and installed apps; type to narrow, ↑↓ to choose, Enter to run, Esc to close. Words
+  can be added as a task or an event on today, or handed to the assistant. Both shortcuts are in
+  Settings → Island → Shortcuts.
+- A clipboard stack: Stack gathers cards, each with a check, and Paste next (or Super+Alt+V) pastes
+  them into the window in front in order. Links open and files show in Files from a card; the search
+  understands `from:`, `type:` and `before:`; Settings → Clipboard keeps copies for 1, 7, 30 or 90 days.
+- Focus figures: today's sessions and time, the last seven days as small bars, and a reminder's ▶
+  starting a session on it with "Focusing on …" and Done. The Focus page also shows the next meeting
+  with Join, and washes the island in a cool grey or green.
+- A blue Join pill in the open island's header from ten minutes before the next event with a meeting
+  link, and while it runs.
+- Timed Do Not Disturb: the chevron by the moon offers 30 minutes, an hour, tomorrow at 9:00 or off,
+  and says until when. It survives the lock screen and a restart, and Isle only turns off what it
+  turned on.
+- The island's black has a faint sheen from its top edge and a 1 px hairline rim; the Calendar and the
+  Notifications page (while Do Not Disturb is on) carry a quiet wash of their own; keyboard focus
+  shows a 2 px ring.
 
 ### Fixed
 

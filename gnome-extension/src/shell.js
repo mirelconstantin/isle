@@ -37,8 +37,9 @@ export class TopBar extends Signals.EventEmitter {
         this._settings = settings;
         this._toggle = () => this.emit('calendar-requested');
         this._dateMenu = Main.panel.statusArea.dateMenu;
-        this._dateMenu.opacity = 0;
-        this._dateMenu.reactive = false;
+        /** What Isle itself hid or widened, so a taskbar's own choices are never overwritten. */
+        this._clockHidden = false;
+        this._widthReserved = false;
 
         this._settingsChanged = [
             ...['top-bar-style', 'top-bar-opacity'].map(key => settings.connect(`changed::${key}`, () => {
@@ -53,6 +54,12 @@ export class TopBar extends Signals.EventEmitter {
             settings.connect('changed::island-in-top-bar', () => this._applyStyle()),
         ];
         this._applyStyle();
+        // The panel can be taken over by another extension (Zorin Taskbar, Dash to Panel) and moved to
+        // the bottom: then it is not a top bar, and Isle must leave its style, clock and width alone.
+        this._wasTopPanel = this.isTopPanel;
+        this._parentChanged = Main.panel.connect('parent-set', () => this._onPanelMoved());
+        this._panelBoxYChanged = Main.layoutManager.panelBox?.connect('notify::y', () => this._onPanelMoved()) ?? 0;
+        this.clockShown = !this.isTopPanel;
         this._styleChanged = Main.panel.connect('notify::style', () => this._onPanelStyle());
 
         this._heightChanged = Main.panel.connect('notify::height', () => this.emit('height-changed'));
@@ -68,9 +75,20 @@ export class TopBar extends Signals.EventEmitter {
         });
     }
 
-    /** In stage pixels; it changes with the compact and notch styles. */
+    /** In stage pixels; it changes with the compact and notch styles. 0 when the panel is not a top bar. */
     get height() {
-        return Main.panel.height;
+        return this.isTopPanel ? Main.panel.height : 0;
+    }
+
+    /** Whether `Main.panel` is still GNOME's top bar, rather than another extension's panel (Zorin Taskbar
+     * moves it to the bottom). A panel moved elsewhere is left exactly as its extension has it. */
+    get isTopPanel() {
+        const box = Main.layoutManager.panelBox;
+        const monitor = Main.layoutManager.primaryMonitor;
+        if (!box || !monitor || !box.contains(Main.panel))
+            return false;
+        const [, y] = Main.panel.get_transformed_position();
+        return y <= monitor.y + 1;
     }
 
     /** Super+V opens Isle's clipboard, unless left to GNOME or the Shelf page is left out. */
@@ -108,28 +126,58 @@ export class TopBar extends Signals.EventEmitter {
 
     /** Whether the bar is as black as the island; otherwise the island hangs from the screen's top edge. */
     get blendsIn() {
-        return this.opacity >= 100;
+        return this.isTopPanel && this.opacity >= 100;
     }
 
-    /** Keeps the top bar's centre clear for the island. */
+    /** Keeps the top bar's centre clear for the island. Never touches another extension's panel. */
     reserveWidth(width) {
+        if (!this.isTopPanel) {
+            this._restoreClock();
+            return;
+        }
         this._dateMenu.set_width(Math.ceil(width));
+        this._widthReserved = true;
     }
 
-    /** Shows GNOME's own clock in the top bar while the island is on another display. */
+    /** Shows GNOME's own clock in the top bar while the island is on another display, or in a taskbar. */
     set clockShown(shown) {
+        // A taskbar's date is its own: Isle only undoes what it hid.
+        if (!this.isTopPanel)
+            shown = true;
         this._clockShown = shown;
-        this._dateMenu.opacity = shown ? 255 : 0;
-        this._dateMenu.reactive = shown;
-        if (shown)
+        if (!shown) {
+            this._clockHidden = true;
+            this._dateMenu.opacity = 0;
+            this._dateMenu.reactive = false;
+            if (this._superVIsIsle)
+                this._dateMenu.menu.close();
+            return;
+        }
+        this._restoreClock();
+    }
+
+    /** Puts the clock and its width back, only if Isle changed them. */
+    _restoreClock() {
+        this._clockShown = true;
+        if (this._clockHidden) {
+            this._clockHidden = false;
+            this._dateMenu.opacity = 255;
+            this._dateMenu.reactive = true;
+        }
+        if (this._widthReserved) {
+            this._widthReserved = false;
             this._dateMenu.set_width(-1);
-        else if (this._superVIsIsle)
-            this._dateMenu.menu.close();
+        }
     }
 
     /** Colour and style classes from the settings; remembers `blendsIn` to spot a change. */
     _applyStyle() {
         this._blended = this.blendsIn;
+        if (!this.isTopPanel) {
+            this._clearBar();
+            this._showClock();
+            return;
+        }
         this._syncColor();
         // The bar's height changes with these; `height-changed` re-lays out the island.
         setStyleClasses(Main.panel, {
@@ -140,9 +188,30 @@ export class TopBar extends Signals.EventEmitter {
         });
     }
 
+    /** Takes every one of Isle's rules off a panel that is not a top bar, leaving its own style. */
+    _clearBar() {
+        this._syncColor(null);
+        setStyleClasses(Main.panel, {
+            [BAR_CLASS]: false, [COMPACT_BAR_CLASS]: false, [NOTCH_BAR_CLASS]: false, [GLASS_BAR_CLASS]: false,
+        });
+    }
+
+    /** Another extension moved the panel (a taskbar taking it over, or giving it back): Isle follows. */
+    _onPanelMoved() {
+        const top = this.isTopPanel;
+        if (top === this._wasTopPanel)
+            return;
+        this._wasTopPanel = top;
+        this._applyStyle();
+        this.emit('style-changed');
+    }
+
     // Another extension that sets the bar's style too would undo Isle's rule each time Isle set it, in a
     // loop that keeps the shell busy: past a few times a second, Isle gives way until the setting changes.
     _onPanelStyle() {
+        // Not a top bar: its style is its extension's, and Isle has nothing to put back.
+        if (!this.isTopPanel)
+            return;
         // Isle's own write, or one that kept Isle's colour: no fight.
         if (this._yielded || this._writing || this._wantedStyle() === (Main.panel.get_style() ?? ''))
             return;
@@ -194,19 +263,17 @@ export class TopBar extends Signals.EventEmitter {
         this._settingsChanged.forEach(id => this._settings.disconnect(id));
         Main.panel.disconnect(this._heightChanged);
         Main.panel.disconnect(this._styleChanged);
+        Main.panel.disconnect(this._parentChanged);
+        if (this._panelBoxYChanged)
+            Main.layoutManager.panelBox.disconnect(this._panelBoxYChanged);
         this._dateMenu.menu.disconnect(this._menuChanged);
         this._settings.disconnect(this._superVChanged);
         this._settings.disconnect(this._pagesChanged);
         this._restoreToggle();
 
-        // No colour of Isle's: the theme's again.
-        this._syncColor(null);
-        setStyleClasses(Main.panel, {
-            [BAR_CLASS]: false, [COMPACT_BAR_CLASS]: false, [NOTCH_BAR_CLASS]: false, [GLASS_BAR_CLASS]: false,
-        });
-        this._dateMenu.set_width(-1);
-        this._dateMenu.opacity = 255;
-        this._dateMenu.reactive = true;
+        // No colour or classes of Isle's: the panel's own again, and its clock back.
+        this._clearBar();
+        this._showClock();
     }
 }
 

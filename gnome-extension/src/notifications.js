@@ -5,6 +5,7 @@
 // banners and emits `banner` by GNOME's rules; Do Not Disturb is GNOME's own "show banners" setting.
 
 import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as MessageTray from 'resource:///org/gnome/shell/ui/messageTray.js';
@@ -20,11 +21,22 @@ export class NotificationCenter extends Signals.EventEmitter {
         this._sources = new Map();
 
         this._settings = new Gio.Settings({schema_id: 'org.gnome.desktop.notifications'});
-        this._settingsChanged = this._settings.connect('changed::show-banners', () => this.emit('dnd-changed'));
+        this._settingsChanged = this._settings.connect('changed::show-banners', () => {
+            // Turned off by hand: a timed Do Not Disturb has nothing left to time.
+            if (!this.dnd)
+                this._clearTimedDnd();
+            else
+                this.emit('dnd-changed');
+        });
 
         this._isleSettings = isleSettings;
         this._bannersChanged = isleSettings.connect('changed::gnome-banners', () => this._syncBanners());
         this._syncBanners();
+
+        /** When a timed Do Not Disturb ends, in ms; 0 for none. */
+        this._dndUntil = isleSettings.get_int64('dnd-until');
+        this._dndTimeout = 0;
+        this._resumeTimedDnd();
 
         for (const source of this._tray.getSources())
             this._watch(source);
@@ -59,6 +71,92 @@ export class NotificationCenter extends Signals.EventEmitter {
     /** Writes GNOME's own setting, so the top bar's switch agrees. */
     set dnd(on) {
         this._settings.set_boolean('show-banners', !on);
+    }
+
+    /** When the timed Do Not Disturb ends (ms since the epoch), or 0. */
+    get dndUntil() {
+        return this._dndUntil > Date.now() ? this._dndUntil : 0;
+    }
+
+    /** Turns Do Not Disturb on for `minutes`; 0 turns it off (unless a focus session owns it). */
+    setDndFor(minutes) {
+        this._cancelDndTimeout();
+        if (minutes <= 0) {
+            this._clearTimedDnd({turnOff: true});
+            return;
+        }
+        const until = Date.now() + Math.round(minutes * 60000);
+        this._dndUntil = until;
+        this._isleSettings.set_int64('dnd-until', until);
+        this._isleSettings.set_boolean('dnd-owned', true);
+        this.dnd = true;
+        this._scheduleDndTimeout();
+        this.emit('dnd-changed');
+    }
+
+    /** Do Not Disturb until tomorrow morning, at 9:00 local time. */
+    setDndUntilTomorrow() {
+        const now = new Date();
+        const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 9, 0, 0);
+        this.setDndFor((tomorrow - now) / 60000);
+    }
+
+    /** Drops a timed Do Not Disturb without turning it off (the user did). */
+    _clearTimedDnd({turnOff = false} = {}) {
+        this._cancelDndTimeout();
+        this._dndUntil = 0;
+        const owned = this._isleSettings.get_boolean('dnd-owned');
+        this._isleSettings.set_int64('dnd-until', 0);
+        this._isleSettings.set_boolean('dnd-owned', false);
+        // "Off" is the user's own choice, even over a focus session's claim (which its dnd-changed
+        // listener then lets go of); otherwise a focus session keeps it on.
+        if (turnOff || (owned && !this._isleSettings.get_boolean('focus-dnd-owned')))
+            this.dnd = false;
+        this.emit('dnd-changed');
+    }
+
+    /** Picks up a timed Do Not Disturb saved before the lock screen or a restart. */
+    _resumeTimedDnd() {
+        if (this._dndUntil > Date.now()) {
+            this._scheduleDndTimeout();
+            return;
+        }
+        if (!this._dndUntil)
+            return;
+        // It ran out while Isle was not running.
+        this._dndUntil = 0;
+        this._isleSettings.set_int64('dnd-until', 0);
+        const owned = this._isleSettings.get_boolean('dnd-owned');
+        this._isleSettings.set_boolean('dnd-owned', false);
+        if (owned && !this._isleSettings.get_boolean('focus-dnd-owned'))
+            this.dnd = false;
+    }
+
+    /** Wakes once, when the timed Do Not Disturb ends. */
+    _scheduleDndTimeout() {
+        this._cancelDndTimeout();
+        const wait = Math.max(0, this._dndUntil - Date.now());
+        this._dndTimeout = GLib.timeout_add(GLib.PRIORITY_DEFAULT, Math.min(wait, 24 * 60 * 60 * 1000), () => {
+            this._dndTimeout = 0;
+            if (this._dndUntil > Date.now()) {
+                this._scheduleDndTimeout();
+                return GLib.SOURCE_REMOVE;
+            }
+            this._dndUntil = 0;
+            this._isleSettings.set_int64('dnd-until', 0);
+            const owned = this._isleSettings.get_boolean('dnd-owned');
+            this._isleSettings.set_boolean('dnd-owned', false);
+            if (owned && !this._isleSettings.get_boolean('focus-dnd-owned'))
+                this.dnd = false;
+            this.emit('dnd-changed');
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _cancelDndTimeout() {
+        if (this._dndTimeout)
+            GLib.source_remove(this._dndTimeout);
+        this._dndTimeout = 0;
     }
 
     /** Marks every notification as seen, clearing the unread dot. */
@@ -222,6 +320,7 @@ export class NotificationCenter extends Signals.EventEmitter {
     destroy() {
         // Tell no one about changes made while tearing down.
         this.disconnectAll();
+        this._cancelDndTimeout();
         this._updateSource?.destroy();
         this._updateSource = null;
         this._tray.disconnect(this._sourceAdded);

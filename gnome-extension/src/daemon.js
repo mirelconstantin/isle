@@ -75,6 +75,7 @@ const INTERFACES = {
             <method name="SetPinned"><arg name="id" type="t" direction="in"/><arg name="pinned" type="b" direction="in"/></method>
             <method name="Remove"><arg name="id" type="t" direction="in"/></method>
             <method name="Clear"/>
+            <method name="SetRetention"><arg name="days" type="x" direction="in"/></method>
             <property name="Items" type="s" access="read"/>`),
         properties: {Items: 'clipboard'},
     },

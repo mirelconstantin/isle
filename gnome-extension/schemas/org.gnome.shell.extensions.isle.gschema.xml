@@ -180,6 +180,21 @@
       <summary>Keep a history of what you copy</summary>
       <description>Text, links, images and files, stored only on this computer.</description>
     </key>
+    <key name="clipboard-retention-days" type="i">
+      <range min="0" max="365"/>
+      <default>0</default>
+      <summary>How long copied items are kept</summary>
+      <description>In days; 0 keeps them until newer copies push them out. Pinned items are always kept.</description>
+    </key>
+    <key name="focus-task-id" type="s">
+      <default>''</default>
+      <summary>Internal: the reminder a focus session is for</summary>
+      <description>The reminder’s id, so the timer can offer to tick it off when the session ends.</description>
+    </key>
+    <key name="focus-task-title" type="s">
+      <default>''</default>
+      <summary>Internal: the title of the reminder a focus session is for</summary>
+    </key>
     <key name="clipboard-ignored-apps" type="as">
       <default>['org.keepassxc.KeePassXC.desktop', 'com.bitwarden.desktop.desktop', 'bitwarden.desktop', '1password.desktop', 'org.gnome.World.Secrets.desktop', 'org.gnome.seahorse.Application.desktop', 'proton-pass.desktop']</default>
       <summary>Apps whose copies are never kept</summary>
@@ -194,6 +209,26 @@
       <default><![CDATA[['<Super>i']]]></default>
       <summary>Voice assistant shortcut</summary>
       <description>Opens the voice assistant and listens. Pressed while listening, it finishes; after an answer, it listens again.</description>
+    </key>
+    <key name="command-shortcut" type="as">
+      <default><![CDATA[['<Super>k']]]></default>
+      <summary>Command surface shortcut</summary>
+      <description>One search over pages, actions, the clipboard, reminders, events and apps; type to find, or to add a task or event.</description>
+    </key>
+    <key name="clipboard-stack-shortcut" type="as">
+      <default><![CDATA[['<Super><Alt>v']]]></default>
+      <summary>Paste the next stacked copy</summary>
+      <description>Pastes the next item gathered in the Shelf’s stack into the window in front.</description>
+    </key>
+    <key name="dnd-until" type="x">
+      <default>0</default>
+      <summary>Internal: when a timed Do Not Disturb ends, in milliseconds since the epoch</summary>
+      <description>0 when no timed Do Not Disturb is set. Kept across restarts and the lock screen.</description>
+    </key>
+    <key name="dnd-owned" type="b">
+      <default>false</default>
+      <summary>Internal: Do Not Disturb was turned on by a timer</summary>
+      <description>Lets Isle turn it off again at the end without touching a Do Not Disturb the user set.</description>
     </key>
     <key name="voice-provider" type="s">
       <default>'auto'</default>

@@ -51,7 +51,7 @@ if the player then rejects the command, isled only logs it.
 | `StartPhase(s phase)` | | Start `focus`, `short_break` or `long_break` right away (`idle` stops). |
 | `Pause()`, `Stop()`, `Skip()` | | `Skip` ends the phase early without counting it. |
 | `SetConfig(s json)` | | Replace the configuration (below). |
-| `State` | `s` | `{phase, running, ends_at_ms, remaining_ms, duration_ms, completed_sessions, sessions_before_long_break, today_sessions, today_focus_ms}`; `phase` is `idle`, `focus`, `short_break` or `long_break`. |
+| `State` | `s` | `{phase, running, ends_at_ms, remaining_ms, duration_ms, completed_sessions, sessions_before_long_break, today_sessions, today_focus_ms, history}`; `phase` is `idle`, `focus`, `short_break` or `long_break`; `history` is the last seven days with a session, oldest first, as `[{date, sessions, focus_ms}]` (kept for 30 days). |
 | `Config` | `s` | `{focus_minutes, short_break_minutes, long_break_minutes, sessions_before_long_break, auto_start_breaks, auto_start_focus}` |
 | `PhaseFinished(s finished, s next)` | signal | A phase ran out (not emitted for `Skip` or `Stop`). |
 
@@ -116,13 +116,14 @@ of the app copied from, or `""`.
 | `SetPinned(t id, b pinned)` | | At most 10 items are pinned; pinning an eleventh fails with `LimitsExceeded`. |
 | `Remove(t id)` | | |
 | `Clear()` | | Remove every item that is not pinned. |
+| `SetRetention(x days)` | | Drop unpinned items older than `days` days now, and on each copy after; 0 keeps them until newer copies push them out. Pinned items are kept. |
 | `Items` | `s` | `[{id, kind, preview, uris, image, thumb, width, height, app_id, at_ms, pinned}]`, newest first. `kind` is `text`, `link`, `image` or `files`; `preview` is the first 160 characters of a text, or the file names one per line; `uris` is empty except for files; `image` and `thumb` (paths), `width` and `height` are null except for images; `at_ms` is when it was last copied. |
 
 Adding something already in the history (the same text, image or list of
 files) moves that item to the top and returns its id; it stays pinned if
-it was. Beyond 20 unpinned items the oldest are
-dropped; pinned items are only removed by hand. Unknown ids and invalid
-content are rejected with `InvalidArgs`.
+it was. Beyond 20 unpinned items the oldest are dropped, and so are those
+older than `SetRetention` allows; pinned items are only removed by hand.
+Unknown ids and invalid content are rejected with `InvalidArgs`.
 
 ## io.github.zickrian.isle.Reminders1
 

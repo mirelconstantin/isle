@@ -3,7 +3,9 @@
 
 use std::sync::Arc;
 
-use isle_core::pomodoro::{FocusStats, Phase, Pomodoro, PomodoroConfig, PomodoroView, TimerState};
+use isle_core::pomodoro::{
+    FocusDay, FocusHistory, FocusStats, Phase, Pomodoro, PomodoroConfig, PomodoroView, TimerState,
+};
 use log::warn;
 use serde::Serialize;
 use tokio::sync::Notify;
@@ -13,13 +15,15 @@ use zbus::{fdo, interface};
 use crate::clock::{next_midnight, now_ms, today, wait_until};
 use crate::store::Store;
 
-/// What the `State` property holds: the timer plus today's focus figures.
+/// What the `State` property holds: the timer plus today's focus figures and the last week.
 #[derive(Serialize)]
 struct State {
     #[serde(flatten)]
     timer: PomodoroView,
     today_sessions: u32,
     today_focus_ms: i64,
+    /// The last seven days that had a session, oldest first.
+    history: Vec<FocusDay>,
 }
 
 /// The Pomodoro1 D-Bus object: the timer, its settings and the focus figures, each saved to disk.
@@ -30,6 +34,8 @@ pub struct PomodoroService {
     timer_store: Store<TimerState>,
     stats: FocusStats,
     stats_store: Store<FocusStats>,
+    history: FocusHistory,
+    history_store: Store<FocusHistory>,
     wake: Arc<Notify>,
 }
 
@@ -39,6 +45,7 @@ impl PomodoroService {
         let mut store = Store::new("pomodoro");
         let mut timer_store = Store::new("pomodoro-timer");
         let mut stats_store = Store::new("focus-stats");
+        let mut history_store = Store::new("focus-history");
         // A phase that ran out while isled was down is finished by `run`'s
         // first tick, like any other.
         Self {
@@ -47,6 +54,8 @@ impl PomodoroService {
             timer_store,
             stats: stats_store.load(),
             stats_store,
+            history: history_store.load(),
+            history_store,
             wake: Arc::default(),
         }
     }
@@ -125,7 +134,7 @@ impl PomodoroService {
         Ok(self.changed(&emitter).await?)
     }
 
-    /// JSON `PomodoroView`, plus `today_sessions` and `today_focus_ms`.
+    /// JSON `PomodoroView`, plus `today_sessions`, `today_focus_ms` and `history`.
     #[zbus(property)]
     fn state(&self) -> String {
         let (today_sessions, today_focus_ms) = self.stats.on(&today());
@@ -133,6 +142,7 @@ impl PomodoroService {
             timer: self.timer.view(now_ms()),
             today_sessions,
             today_focus_ms,
+            history: self.history.recent(7),
         };
         serde_json::to_string(&state).unwrap_or_default()
     }
@@ -170,8 +180,11 @@ pub async fn run(iface: InterfaceRef<PomodoroService>) {
         let focus_ms = service.timer.view(now).duration_ms;
         let transition = service.timer.tick(now);
         if transition.is_some_and(|t| t.finished == Phase::Focus) {
-            service.stats.record(&today(), focus_ms);
+            let today = today();
+            service.stats.record(&today, focus_ms);
             service.stats_store.save(&service.stats);
+            service.history.record(&today, focus_ms);
+            service.history_store.save(&service.history);
         }
         if transition.is_some() {
             service.timer_store.save(&service.timer.state());

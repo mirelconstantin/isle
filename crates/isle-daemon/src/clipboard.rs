@@ -34,6 +34,9 @@ pub struct ClipboardService {
     history: ClipboardHistory,
     store: Store<ClipboardHistory>,
     clips: ClipFiles,
+    /// Items older than this many days are dropped; 0 keeps them until newer copies push them out.
+    /// The extension sends it whenever it appears or the setting changes.
+    retention_days: i64,
 }
 
 impl ClipboardService {
@@ -69,6 +72,7 @@ impl ClipboardService {
             history,
             store,
             clips,
+            retention_days: 0,
         }
     }
 
@@ -79,11 +83,27 @@ impl ClipboardService {
     }
 
     /// Saves and announces an addition, then deletes the image files the
-    /// addition pushed out of the history.
-    async fn added(&self, added: Added, emitter: &SignalEmitter<'_>) -> fdo::Result<u64> {
+    /// addition pushed out of the history (or that expired).
+    async fn added(
+        &self,
+        added: Added,
+        expired: Vec<String>,
+        emitter: &SignalEmitter<'_>,
+    ) -> fdo::Result<u64> {
         self.changed(emitter).await?;
-        self.clips.remove(&added.unreferenced);
+        let mut gone = added.unreferenced;
+        gone.extend(expired);
+        self.clips.remove(&gone);
         Ok(added.id)
+    }
+
+    /// Drops items older than `retention_days`, keeping pinned ones; returns the images left unused.
+    fn prune_expired(&mut self) -> Vec<String> {
+        if self.retention_days <= 0 {
+            return Vec::new();
+        }
+        let cutoff = now_ms() - self.retention_days * 24 * 60 * 60 * 1000;
+        self.history.retain(|item| item.pinned || item.at_ms >= cutoff)
     }
 
     /// The `Items` list, built fresh from the history.
@@ -157,7 +177,8 @@ impl ClipboardService {
     ) -> fdo::Result<u64> {
         let clip = Clip::from_text(text).map_err(invalid)?;
         let added = self.history.add(clip, app_id, now_ms());
-        self.added(added, &emitter).await
+        let expired = self.prune_expired();
+        self.added(added, expired, &emitter).await
     }
 
     /// Records a copied PNG image and returns its id. Decoding and scaling
@@ -196,7 +217,8 @@ impl ClipboardService {
             height,
         };
         let added = self.history.add(clip, app_id, now_ms());
-        let added = self.added(added, &emitter).await;
+        let expired = self.prune_expired();
+        let added = self.added(added, expired, &emitter).await;
         // The image and its decoded pixels are gone now.
         crate::trim_memory();
         added
@@ -211,7 +233,25 @@ impl ClipboardService {
     ) -> fdo::Result<u64> {
         let clip = Clip::from_uris(uris).map_err(invalid)?;
         let added = self.history.add(clip, app_id, now_ms());
-        self.added(added, &emitter).await
+        let expired = self.prune_expired();
+        self.added(added, expired, &emitter).await
+    }
+
+    /// How long copies are kept, in days (0 for until newer copies push them out). The extension sends
+    /// its setting whenever it appears or changes.
+    async fn set_retention(
+        &mut self,
+        days: i64,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+    ) -> fdo::Result<()> {
+        self.retention_days = days.clamp(0, 365);
+        let expired = self.prune_expired();
+        if expired.is_empty() {
+            return Ok(());
+        }
+        self.changed(&emitter).await?;
+        self.clips.remove(&expired);
+        Ok(())
     }
 
     /// The full content to put back on the clipboard: the text, the file

@@ -18,10 +18,11 @@ import {namesProject} from './actionRules.js';
 import * as Alerts from './alerts.js';
 import {paletteFor} from './bot.js';
 import {ClipboardHistory} from './clipboard.js';
+import {CommandPalette, clipRow} from './commandPalette.js';
 import {CompactView} from './compact.js';
 import {grabsKeyboard, inhibitScanout, onUiScale, px, uiScale} from './compat.js';
 import {Daemon} from './daemon.js';
-import {BOTTOM_PADDING, ExpandedView, PAGE_HEIGHT} from './expanded.js';
+import {BOTTOM_PADDING, ExpandedView, PAGE_HEIGHT, PAGE_TABS} from './expanded.js';
 import {Island} from './island.js';
 import {AudioOutputs} from './audio.js';
 import {CallMonitor} from './call.js';
@@ -196,6 +197,12 @@ export class Controller {
         this._voiceAfter = [];
         /** The window text was last selected in, so a selection only goes to the AI from where it was made. */
         this._selectedIn = null;
+        /** The next event with a meeting link: {id, title, start_ms, end_ms, link}. */
+        this._meeting = null;
+        /** Meeting links already looked up, by event id; a page of calendar events costs one call each. */
+        this._meetingLinks = new Map();
+        /** Whether the command surface is open, and its view. */
+        this._paletteOpen = false;
 
         // Built a part at a time, frames drawn in between: all at once, it held the screen still for a tenth
         // of a second at every login and unlock. Nothing outside calls in before the last part.
@@ -254,6 +261,7 @@ export class Controller {
         this._botLook = this._readBotLook();
         this._voice = new VoiceView(this._botLook);
         this._voice.chatLook = this._botLook;
+        this._palette = new CommandPalette();
     }
 
     // The bar and the island appear together: the clock gives way to it in the same frame.
@@ -261,7 +269,7 @@ export class Controller {
         this._topBar = new TopBar(this._settings);
         this._shelf = this._expanded.pageNamed('shelf');
         this._shelfHelper = new ShelfHelper(this._island, this._shelf);
-        for (const view of [this._compact, ...this._peeks, this._expanded, this._voice])
+        for (const view of [this._compact, ...this._peeks, this._expanded, this._voice, this._palette])
             this._island.addView(view);
         Main.layoutManager.addChrome(this._island, {trackFullscreen: true});
         this._updateGeometry();
@@ -327,7 +335,10 @@ export class Controller {
             }));
         });
         this._syncVoiceEnabled();
+        this._syncStackShortcut();
+        this._syncCommandShortcut();
         this._syncUsage();
+        this._syncClipboard();
         this._syncEventAlerts();
         this._syncPages();
         // The pointer met while it was still being built (after unlocking, at rest on it) is told now.
@@ -345,7 +356,7 @@ export class Controller {
             () => new CallPage(this._daemon, this._call, this._privacy, this._settings, size),
             () => new MediaPage(this._daemon, this._audio, size),
             () => new NotificationsPage(this._daemon, this._notifications, size),
-            () => new TimerPage(this._daemon, size),
+            () => new TimerPage(this._daemon, this._settings, size),
             () => new TasksPage(this._daemon, size),
             () => new ShelfPage(this._daemon, this._clipboard, this._settings, size),
             () => new CalendarPage(this._daemon, size),
@@ -390,7 +401,32 @@ export class Controller {
             this.collapse();
             this._extension.openPreferences();
         });
+        // The next event, for the meeting pill and the Focus page; its link is looked up once.
+        expanded.connect('next-event', (_view, json) => this._onNextEvent(json));
+        expanded.connect('meeting-requested', (_view, link) => {
+            this.collapse();
+            this._openLink(link);
+        });
+        expanded.pageNamed('focus').connect('meeting-requested', (_page, link) => {
+            this.collapse();
+            this._openLink(link);
+        });
+        // A reminder's ▶: it becomes the focus session's task, and the timer starts.
+        expanded.pageNamed('reminders').connect('focus-task', (_page, id, title) => this._focusTask(id, title));
         return expanded;
+    }
+
+    /** Starts a focus session on a reminder, and shows the Focus page. */
+    _focusTask(id, title) {
+        this._settings.set_string('focus-task-id', String(id));
+        this._settings.set_string('focus-task-title', title);
+        // A break would keep the task waiting: a session picked from a reminder starts a focus phase.
+        const phase = this._daemon.state.pomodoro?.phase;
+        if (phase === 'short_break' || phase === 'long_break')
+            this._daemon.call('pomodoro', 'StartPhase', 'focus');
+        else
+            this._daemon.call('pomodoro', 'Start');
+        this.expand('focus');
     }
 
     /** Everything else it reacts to: pointer, keys, the shelf helper, Settings, isled and notifications. */
@@ -449,6 +485,8 @@ export class Controller {
             this._syncUsage();
         }));
         this._settingsChanged.push(this._settings.connect('changed::voice-shortcut', () => (this._voice.shortcut = this._voiceShortcut)));
+        this._settingsChanged.push(this._settings.connect('changed::clipboard-stack-shortcut', () => this._syncStackShortcut()));
+        this._settingsChanged.push(this._settings.connect('changed::command-shortcut', () => this._syncCommandShortcut()));
         for (const key of ['bot-shape', 'bot-color', 'bot-glow'])
             this._settingsChanged.push(this._settings.connect(`changed::${key}`, () => this._syncBotLook()));
         for (const key of ['usage-enabled', 'usage-claude', 'usage-codex', 'usage-grok', 'usage-warn', 'usage-critical'])
@@ -525,6 +563,8 @@ export class Controller {
                 this._syncLyrics();
             else if (name === 'agents')
                 this._syncAgents(true);
+            else if (name === 'clipboard')
+                this._syncClipboard();
         });
         daemon.connect('agent-event', (_daemon, event) => this._onAgentEvent(event));
         daemon.connect('agent-asking', (_daemon, request) => this._onAgentAsking(request));
@@ -544,6 +584,9 @@ export class Controller {
         });
         this._settingsChanged.push(this._settings.connect('changed::check-updates', () => this._syncUpdates()));
         this._settingsChanged.push(this._settings.connect('changed::lyrics-online', () => this._syncLyrics()));
+        this._settingsChanged.push(this._settings.connect('changed::clipboard-retention-days', () => this._syncClipboard()));
+        this._palette.connect('chosen', (_view, data) => this._onPaletteChosen(data));
+        this._palette.connect('closed', () => this._closePalette());
         this._voice.connect('orb-clicked', () => this._onVoiceKey());
         // The × on an answer or an alert puts it away, as a click on the answer or a right click on the alert does.
         this._voice.connect('close-requested', () => this.collapse());
@@ -635,13 +678,16 @@ export class Controller {
         // bar; on any other it hangs from the top of the screen like a notch.
         this._island.topInset = this._blendsIn ? this._topBar.height : 0;
         this._island.monitor = this._monitor;
-        // Without a top bar (another display) the open island's header is its own.
-        this._expanded.topInset = this._onBar ? this._topBar.height : px(HEADER_WITHOUT_BAR);
-        this._topBar.clockShown = !this._onBar;
+        // Without a top bar (another display, or a taskbar that took Main.panel) the open island's header
+        // is its own, and GNOME's clock stays where it is.
+        this._expanded.topInset = this._inTopBar ? this._topBar.height : px(HEADER_WITHOUT_BAR);
+        this._topBar.clockShown = !this._inTopBar;
         this._render();
         if (this._monitor !== before)
             this._syncFullscreen();
         this._syncScanout();
+        if (this._inTopBar)
+            this._keepAbovePanel();
     }
 
     /** GNOME sends a window covering the whole display straight to the screen, hiding the island that still
@@ -661,7 +707,7 @@ export class Controller {
         if (!monitor)
             return false;
         const panelBox = Main.layoutManager.panelBox;
-        if (this._onBar && panelBox.mapped && panelBox.get_transformed_position()[1] >= monitor.y)
+        if (this._inTopBar && panelBox.mapped && panelBox.get_transformed_position()[1] >= monitor.y)
             return false;
         const workspace = global.workspace_manager.get_active_workspace();
         const top = global.get_window_actors().map(actor => actor.meta_window).reverse().find(window =>
@@ -695,14 +741,19 @@ export class Controller {
             this._updateGeometry();
     }
 
-    /** Whether the island is on the main display, in its top bar. */
+    /** Whether the island is on the main display. */
     get _onBar() {
         return this._monitor === Main.layoutManager.primaryMonitor;
     }
 
+    /** Whether `Main.panel` there is still GNOME's top bar, rather than a taskbar that took it over. */
+    get _inTopBar() {
+        return this._onBar && this._topBar.isTopPanel;
+    }
+
     /** Whether it grows out of a black top bar there. */
     get _blendsIn() {
-        return this._onBar && this._topBar.blendsIn;
+        return this._inTopBar && this._topBar.blendsIn;
     }
 
     // Calendar and AI agents
@@ -731,6 +782,11 @@ export class Controller {
             !this._settings.get_strv('hidden-pages').includes('music'));
     }
 
+    /** How long isled keeps copied items (0: until newer copies push them out). */
+    _syncClipboard() {
+        this._daemon.call('clipboard', 'SetRetention', this._settings.get_int('clipboard-retention-days'));
+    }
+
     /** An event starts soon: an alert, with Join when the event has a meeting link. Not in Do Not Disturb. */
     async _onEventSoon(event) {
         if (this._notifications.dnd)
@@ -743,13 +799,69 @@ export class Controller {
         // Isle turned off, or Do Not Disturb on, while the link was looked for.
         if (this._destroying || this._notifications.dnd)
             return;
-        this._post(Alerts.meeting(event, link, () => {
-            try {
-                Gio.AppInfo.launch_default_for_uri(link, global.create_app_launch_context(0, -1));
-            } catch (e) {
-                console.warn(`Isle: could not open the meeting: ${e.message}`);
-            }
-        }));
+        this._post(Alerts.meeting(event, link, () => this._openLink(link)));
+    }
+
+    /** Opens a meeting or any other link in the app for it; the island gets out of the way. */
+    _openLink(link) {
+        if (!link)
+            return;
+        try {
+            Gio.AppInfo.launch_default_for_uri(link, global.create_app_launch_context(0, -1));
+        } catch (e) {
+            console.warn(`Isle: could not open ${link}: ${e.message}`);
+        }
+    }
+
+    /** The next event today or tomorrow changed: looks its meeting link up once and shows the pill. */
+    async _onNextEvent(json) {
+        if (!json) {
+            // A link still being looked up for the last one must not bring it back.
+            this._nextEventSeq = (this._nextEventSeq ?? 0) + 1;
+            this._setMeeting(null);
+            return;
+        }
+        let event;
+        try {
+            event = JSON.parse(json);
+        } catch (e) {
+            console.warn(`Isle: invalid next event: ${e.message}`);
+            return;
+        }
+        // A newer event may arrive while this one's link is looked up; only the newest sets the pill.
+        const seq = (this._nextEventSeq = (this._nextEventSeq ?? 0) + 1);
+        let link = this._meetingLinks.get(event.id) ?? '';
+        if (event.id && !this._meetingLinks.has(event.id)) {
+            // GNOME's id: the calendar, the event and its recurrence, a line each.
+            const [source, uid] = event.id.split('\n');
+            if (source && uid)
+                link = (await this._daemon.call('calendar', 'MeetingLink', source, uid))?.[0] ?? '';
+            this._meetingLinks.set(event.id, link);
+            if (this._meetingLinks.size > 64)
+                this._meetingLinks.delete(this._meetingLinks.keys().next().value);
+        }
+        if (this._destroying || seq !== this._nextEventSeq)
+            return;
+        this._setMeeting({...event, link});
+    }
+
+    /** Puts the next meeting in the header and on the Focus page; ticks its countdown while it is near. */
+    _setMeeting(meeting) {
+        this._meeting = meeting?.link ? meeting : null;
+        this._expanded.setMeeting(this._meeting);
+        this._expanded.pageNamed('focus').nextMeeting = this._meeting;
+        this._cancel('meeting-tick');
+        if (!this._meeting)
+            return;
+        // Wake when it comes within ten minutes, then every half minute for the countdown.
+        const near = this._meeting.start_ms - 10 * 60000;
+        const wait = near > Date.now() ? Math.min(near - Date.now(), 6 * 60 * 60 * 1000) : 30 * 1000;
+        this._later('meeting-tick', wait, () => {
+            // The one on screen may have ended; ask for the next, and move the countdown on.
+            this._expanded.pageNamed('calendar').refreshNextEvent();
+            this._expanded.setMeeting(this._meeting);
+            this._setMeeting(this._meeting);
+        });
     }
 
     /** The hooks as Settings say, once isled is there: a switch left on comes back after a reinstall, and one
@@ -858,7 +970,8 @@ export class Controller {
     _render() {
         if (this._destroying)
             return;
-        const presentation = this._voiceOpen ? 'voice'
+        const presentation = this._paletteOpen ? 'palette'
+            : this._voiceOpen ? 'voice'
             : this._expandWanted ? 'expanded' : this._alert ? 'peek' : 'compact';
         this._presentation = presentation;
         if (presentation !== 'compact')
@@ -866,10 +979,11 @@ export class Controller {
         // A display without the top bar: the island hangs from its top edge. Sizes are in stage pixels; the
         // CSS ones (padding) are divided by `scale` again, as St multiplies them.
         const scale = uiScale();
-        const top = this._onBar ? this._topBar.height : 0;
+        const top = this._inTopBar ? this._topBar.height : 0;
         // The closed island keeps the size it has in the bar on a display without one: moving the island
-        // there must not shrink it (see the compact case below).
-        const inBar = this._settings.get_boolean('island-in-top-bar');
+        // there must not shrink it (see the compact case below). A panel another extension moved is no
+        // bar to sit in.
+        const inBar = this._settings.get_boolean('island-in-top-bar') && this._inTopBar;
         // Before measuring it: inside the bar it is smaller.
         this._compact.inBar = inBar;
 
@@ -880,12 +994,20 @@ export class Controller {
         case 'expanded':
             size = {
                 width: this._expanded.preferredWidth,
-                height: (this._onBar ? top : HEADER_WITHOUT_BAR * scale) + (PAGE_HEIGHT + BOTTOM_PADDING) * scale,
+                height: (this._inTopBar ? top : HEADER_WITHOUT_BAR * scale) + (PAGE_HEIGHT + BOTTOM_PADDING) * scale,
                 radius: EXPANDED_RADIUS * scale,
                 shoulder: EXPANDED_SHOULDER * scale,
             };
             view = this._expanded;
             break;
+        case 'palette': {
+            const inset = this._blendsIn ? top : PEEK_TOP_GLASS * scale;
+            size = {width: this._palette.preferredWidth, height: inset + this._palette.fit(), radius: VOICE_RADIUS * scale,
+                shoulder: PEEK_SHOULDER * scale};
+            view = this._palette;
+            view.style = `padding-top: ${inset / scale}px;`;
+            break;
+        }
         case 'voice': {
             // Like an alert, it hangs below the bar (or near the top of the screen).
             const inset = this._blendsIn ? top : PEEK_TOP_GLASS * scale;
@@ -914,7 +1036,7 @@ export class Controller {
             view.style = inBar ? null : `padding-top: ${top / scale}px;`;
         }
         view.set_size(size.width, size.height);
-        if (this._onBar)
+        if (this._inTopBar)
             this._topBar.reserveWidth(this._compact.preferredWidth);
         this._island.morph(size, view);
         this._expanded.setActive(presentation === 'expanded');
@@ -1042,6 +1164,11 @@ export class Controller {
 
     /** The pointer came or went: holds or times out alerts and answers, and opens or closes the island. */
     _onHoverChanged(moved = false) {
+        // The command surface keeps the keyboard until Esc or a click outside; the pointer does not close it.
+        if (this._paletteOpen) {
+            this._syncClose();
+            return;
+        }
         const unmoved = this._hoverUnmoved;
         this._hoverUnmoved = false;
         this._cancel('hover');
@@ -1258,6 +1385,10 @@ export class Controller {
 
     /** Left opens or acts, middle plays or pauses, right puts an alert away or brings the call or player forward. */
     _onClick(event, button = event.get_button()) {
+        // Clicks inside the command surface belong to its field and rows; a click outside is caught
+        // by the keyboard grab, which closes it.
+        if (this._paletteOpen)
+            return Clutter.EVENT_PROPAGATE;
         // A click puts an answer away; the face and the Sign in button take their own clicks.
         if (this._voiceOpen) {
             // Peeked at by hovering while it works, a click keeps it open, Esc putting it back.
@@ -1327,6 +1458,10 @@ export class Controller {
     collapse() {
         if (this._destroying)
             return;
+        if (this._paletteOpen) {
+            this._closePalette();
+            return;
+        }
         this._cancel('collapse');
         this._setKeyboard(false);
         // Once closed and settled, what changed meanwhile is laid out for next time (see `_warmUp`); the
@@ -1359,6 +1494,8 @@ export class Controller {
         // Hidden by a fullscreen window, it would take the keyboard unseen.
         if (!this._island.visible)
             return;
+        if (this._paletteOpen)
+            this._closePalette();
         if (this._expandWanted && this._keyboardGrab) {
             this.collapse();
             return;
@@ -1432,7 +1569,7 @@ export class Controller {
             this._showAlert(alert, {inPlace: true});
             return;
         }
-        if (this._expandWanted || this._voiceOpen) {
+        if (this._expandWanted || this._voiceOpen || this._paletteOpen) {
             // Volume and the like are stale by the time the island closes.
             if (!alert.transient)
                 this._enqueue(alert);
@@ -1547,6 +1684,10 @@ export class Controller {
     // Hidden by a fullscreen window: an agent's ask goes to its terminal, as one asked now would (see
     // `_onAgentAsking`); the alert on screen waits to be seen, its time not running out unseen.
     _onHidden() {
+        if (this._paletteOpen) {
+            this._paletteOpen = false;
+            this._setKeyboard(false);
+        }
         this._passAgentAsks();
         this._shelveAlert();
         this._render();
@@ -1565,7 +1706,8 @@ export class Controller {
     /** Shows the first alert in line that still has something to say, once nothing else is on screen. */
     _nextAlert() {
         // One shows already (the command asked as the assistant closed): the queue waits behind it.
-        if (this._alert || !this._island.visible || this._expandWanted || this._voiceOpen || !this._queue.length) {
+        if (this._alert || !this._island.visible || this._expandWanted || this._voiceOpen || this._paletteOpen ||
+            !this._queue.length) {
             this._render();
             return;
         }
@@ -1589,7 +1731,7 @@ export class Controller {
         if (Main.layoutManager.monitors.length > 1 && global.display.get_current_monitor() !== this._monitor?.index)
             return false;
         // While the island is open the OSD would cover it; let GNOME show it.
-        if (this._expandWanted || this._voiceOpen)
+        if (this._expandWanted || this._voiceOpen || this._paletteOpen)
             return false;
         const alert = Alerts.osd(icon, label, level, maxLevel);
         // Pressing on at 0% or 100% stretches the island like a rubber band.
@@ -1723,12 +1865,269 @@ export class Controller {
         this._voice.shortcut = this._voiceShortcut;
     }
 
+    /** Binds the paste-stack shortcut while it is set. */
+    _syncStackShortcut() {
+        const wanted = Boolean(this._settings.get_strv('clipboard-stack-shortcut')[0]);
+        if (wanted && !this._stackBound) {
+            Main.wm.addKeybinding('clipboard-stack-shortcut', this._settings, Meta.KeyBindingFlags.IGNORE_AUTOREPEAT,
+                Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW | Shell.ActionMode.POPUP,
+                () => this._onStackKey());
+        } else if (!wanted && this._stackBound) {
+            Main.wm.removeKeybinding('clipboard-stack-shortcut');
+        }
+        this._stackBound = wanted;
+    }
+
+    /** Pastes the next stacked copy; with none gathered, opens the Shelf to gather some. */
+    _onStackKey() {
+        if (!this._island.visible || this._shelf.hidden)
+            return;
+        if (this._paletteOpen)
+            this._closePalette();
+        if (this._shelf.pasteNext())
+            return;
+        this._shelf.enterStack();
+        this.expand('shelf');
+        this._holdOpen();
+    }
+
+    /** Binds the command surface shortcut while it is set. */
+    _syncCommandShortcut() {
+        const wanted = Boolean(this._settings.get_strv('command-shortcut')[0]);
+        if (wanted && !this._commandBound) {
+            Main.wm.addKeybinding('command-shortcut', this._settings, Meta.KeyBindingFlags.IGNORE_AUTOREPEAT,
+                Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW | Shell.ActionMode.POPUP,
+                () => this._onCommandKey());
+        } else if (!wanted && this._commandBound) {
+            Main.wm.removeKeybinding('command-shortcut');
+        }
+        this._commandBound = wanted;
+    }
+
+    /** Opens the command surface, or puts it away. */
+    _onCommandKey() {
+        if (this._paletteOpen) {
+            this._closePalette();
+            return;
+        }
+        if (!this._island.visible)
+            return;
+        this._openPalette();
+    }
+
+    /** The command surface over the island, with everything it can find right now. */
+    _openPalette() {
+        this._cancel('expand');
+        this._cancel('collapse');
+        this._expandWanted = false;
+        if (this._voiceOpen)
+            this._closeVoice();
+        this._shelveAlert();
+        this._paletteOpen = true;
+        this._setKeyboard(true);
+        // Another grab (a menu, a dialog) holds the keyboard: the surface would take no keys.
+        if (!this._keyboardGrab) {
+            this._paletteOpen = false;
+            this._render();
+            this._nextAlert();
+            return;
+        }
+        let data;
+        try {
+            data = this._paletteData();
+        } catch (e) {
+            console.warn(`Isle: could not gather the command surface: ${e.message}`);
+            this._paletteOpen = false;
+            this._setKeyboard(false);
+            this._render();
+            this._nextAlert();
+            return;
+        }
+        this._palette.open(data);
+        this._render();
+        this._palette.focus();
+    }
+
+    /** Puts the command surface away, and shows what waited behind it. */
+    _closePalette() {
+        if (!this._paletteOpen)
+            return;
+        this._paletteOpen = false;
+        this._setKeyboard(false);
+        this._render();
+        this._nextAlert();
+    }
+
+    /** Pages, actions, clips, reminders, events and apps, as the command surface shows them. */
+    _paletteData() {
+        const pages = this._expanded.pages
+            .filter(page => page.available)
+            .map(page => ({name: page.name, title: PAGE_TABS[page.name]?.label ?? page.name,
+                icon: PAGE_TABS[page.name]?.icon ?? 'isle-open-symbolic'}));
+        const actions = [
+            {id: 'settings', title: 'Isle Settings', subtitle: 'Look, pages, alerts, assistant', icon: 'isle-settings', keywords: 'preferences'},
+            {id: 'focus-start', title: 'Start focus', subtitle: 'Pomodoro', icon: 'isle-timer', keywords: 'pomodoro timer work'},
+            {id: 'focus-pause', title: 'Pause focus', subtitle: 'Pomodoro', icon: 'isle-pause-symbolic', keywords: 'pomodoro timer break'},
+            {id: 'dnd-1h', title: 'Do Not Disturb for 1 hour', icon: 'isle-moon', keywords: 'dnd do not disturb silence notifications quiet'},
+            {id: 'dnd-off', title: 'Turn off Do Not Disturb', icon: 'isle-bell', keywords: 'dnd do not disturb notifications'},
+            {id: 'media-play', title: 'Play or pause music', icon: 'isle-play-symbolic', keywords: 'song spotify youtube'},
+            {id: 'media-next', title: 'Next song', icon: 'isle-forward-symbolic', keywords: 'music skip'},
+            {id: 'clipboard', title: 'Open the clipboard', icon: 'isle-clipboard', keywords: 'shelf history copies'},
+            {id: 'calendar', title: 'Open the calendar', icon: 'isle-calendar', keywords: 'events month'},
+            {id: 'notifications', title: 'Open notifications', icon: 'isle-bell', keywords: 'messages alerts'},
+        ];
+        if (this._meeting)
+            actions.unshift({id: 'meeting', title: `Join ${this._meeting.title}`, subtitle: 'Meeting',
+                icon: 'isle-video-symbolic', keywords: 'meet zoom teams webex join'});
+
+        // The installed apps change rarely; looking them up on every open would make the surface wait.
+        this._paletteApps ??= Shell.AppSystem.get_default().get_installed()
+            .filter(app => {
+                try {
+                    return app.should_show();
+                } catch {
+                    return false;
+                }
+            })
+            .map(app => ({id: app.get_id(), title: app.get_name() ?? app.get_id() ?? '', subtitle: 'App',
+                gicon: app.get_icon(), app}));
+        const apps = this._paletteApps;
+
+        const clips = (this._daemon.state.clipboard ?? []).map(item => {
+            const app = item.app_id ? Shell.AppSystem.get_default().lookup_app(item.app_id) : null;
+            return clipRow(item, app?.get_name() ?? '');
+        });
+
+        const tasks = (this._daemon.state.tasks ?? []).filter(task => !task.done)
+            .map(task => ({id: task.id, title: task.title, subtitle: 'Reminder', icon: 'isle-tasks'}));
+
+        const events = this._expanded.pageNamed('calendar').todayEvents().map(event => ({
+            id: event.title,
+            title: event.title,
+            subtitle: event.allDay || !Number.isFinite(event.start)
+                ? 'All day'
+                : Format.timeOfDay(GLib.DateTime.new_from_unix_local(Math.floor(event.start / 1000))),
+            icon: 'isle-calendar',
+        }));
+
+        return {pages, actions, clips, tasks, events, apps};
+    }
+
+    /** Runs what the command surface chose. */
+    _onPaletteChosen(data) {
+        // A page or an action that opens one grows straight from the surface into it, with no shrink
+        // to the compact island in between.
+        const opensPage = ['page', 'task', 'event', 'add-task', 'add-event'].includes(data.kind) ||
+            (data.kind === 'action' && ['focus-start', 'focus-pause', 'clipboard', 'calendar', 'notifications'].includes(data.id));
+        if (opensPage) {
+            this._paletteOpen = false;
+            this._setKeyboard(false);
+        } else {
+            this._closePalette();
+        }
+        switch (data.kind) {
+        case 'page':
+            this.expand(data.name);
+            break;
+        case 'action':
+            this._runPaletteAction(data.id);
+            break;
+        case 'clip':
+            this._clipboard.copy(data.item, {touch: true}).then(copied => {
+                if (copied && !this._destroying)
+                    this._clipboard.paste();
+            });
+            break;
+        case 'task':
+            this.expand('reminders');
+            break;
+        case 'event':
+            this.expand('calendar');
+            break;
+        case 'app':
+            try {
+                data.app.activate();
+            } catch (e) {
+                console.warn(`Isle: could not open ${data.title}: ${e.message}`);
+            }
+            break;
+        case 'add-task':
+            this._daemon.call('todo', 'Add', data.query);
+            this.expand('reminders');
+            break;
+        case 'add-event':
+            this._daemon.call('calendar', 'Add', this._todayKey(), data.query);
+            this.expand('calendar');
+            break;
+        case 'ask':
+            this._openVoice({typing: true});
+            this._ask(data.query);
+            break;
+        default:
+            break;
+        }
+    }
+
+    /** "2026-10-27" for today. */
+    _todayKey() {
+        const now = new Date();
+        const pad = number => String(number).padStart(2, '0');
+        return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    }
+
+    /** The command surface's actions that are not a page or a record. */
+    _runPaletteAction(id) {
+        switch (id) {
+        case 'settings':
+            this._extension.openPreferences();
+            break;
+        case 'focus-start':
+            this._daemon.call('pomodoro', 'Start');
+            this.expand('focus');
+            break;
+        case 'focus-pause':
+            this._daemon.call('pomodoro', 'Pause');
+            this.expand('focus');
+            break;
+        case 'dnd-1h':
+            this._notifications.setDndFor(60);
+            break;
+        case 'dnd-off':
+            this._notifications.setDndFor(0);
+            break;
+        case 'media-play':
+            this._daemon.call('media', 'PlayPause');
+            break;
+        case 'media-next':
+            this._daemon.call('media', 'Next');
+            break;
+        case 'meeting':
+            this._openLink(this._meeting?.link);
+            break;
+        case 'clipboard':
+            this._shelf.leaveStack();
+            this._shelf.showTab('clipboard');
+            this.expand('shelf');
+            break;
+        case 'calendar':
+            this.expand('calendar');
+            break;
+        case 'notifications':
+            this.expand('notifications');
+            break;
+        default:
+            break;
+        }
+    }
+
     // The shortcut (or the face) opens the assistant listening; while listening it finishes,
     // and once answered it listens again for a follow-up.
     _onVoiceKey() {
         // Hidden by a fullscreen window: it would listen unseen.
         if (!this._island.visible)
             return;
+        if (this._paletteOpen)
+            this._closePalette();
         if (!this._voiceOpen) {
             // A request still at work shows its progress; a new one waits until it is done.
             if (this._voiceWorking)
@@ -2355,6 +2754,10 @@ export class Controller {
         stopPending();
         if (this._voiceBound)
             Main.wm.removeKeybinding('voice-shortcut');
+        if (this._stackBound)
+            Main.wm.removeKeybinding('clipboard-stack-shortcut');
+        if (this._commandBound)
+            Main.wm.removeKeybinding('command-shortcut');
         // A command waiting for Run or Deny ends with Isle; built again, it is asked again (see `_onAssistant`).
         this._deciding?.done(false);
         if (this._voiceOpen)
@@ -2402,10 +2805,14 @@ export class Controller {
     /** Lets GNOME send windows straight to the screen again, as it was before Isle (see `_syncScanout`). */
     // Hide Top Bar adds the bar again, over the island, which then never gets the pointer: put it back below.
     _keepAbovePanel() {
+        // A taskbar owns its own panel and stacking; there is no top bar to keep below the island.
+        if (!this._inTopBar)
+            return;
         const group = Main.layoutManager.uiGroup;
         const children = group.get_children();
-        if (children.indexOf(Main.layoutManager.panelBox) > children.indexOf(this._island))
-            group.set_child_below_sibling(Main.layoutManager.panelBox, this._island);
+        const panelBox = Main.layoutManager.panelBox;
+        if (children.includes(panelBox) && children.indexOf(panelBox) > children.indexOf(this._island))
+            group.set_child_below_sibling(panelBox, this._island);
     }
 
     _releaseScanout() {
@@ -2433,6 +2840,10 @@ export class Controller {
             global.display.disconnect(id);
         if (this._voiceBound)
             Main.wm.removeKeybinding('voice-shortcut');
+        if (this._stackBound)
+            Main.wm.removeKeybinding('clipboard-stack-shortcut');
+        if (this._commandBound)
+            Main.wm.removeKeybinding('command-shortcut');
         this._setKeyboard(false);
         const monitor = global.backend.get_core_idle_monitor();
         for (const watch of [this._idleWatch, this._batteryIdleWatch, this._activeWatch].filter(Boolean))
@@ -2446,7 +2857,7 @@ export class Controller {
         this._shelfHelper?.destroy();
         // The views are the island's once it is on screen (see `_buildIsland`); before, each goes by itself.
         if (!this._island?.get_parent()) {
-            for (const view of [this._compact, ...this._peeks ?? [], this._voice, this._expanded])
+            for (const view of [this._compact, ...this._peeks ?? [], this._voice, this._palette, this._expanded])
                 view?.destroy();
             if (!this._expanded)
                 this._pages.forEach(page => page.destroy());

@@ -460,6 +460,17 @@ export const Island = GObject.registerClass({
                 cr.fillPreserve();
             }
         }
+        // A faint sheen from the top edge and a hairline rim: the black reads as a solid, lit object
+        // rather than a hole cut in the screen.
+        const {top} = this._outlineBox;
+        const sheen = new Cairo.LinearGradient(0, top, 0, top + Math.min(90, (height - top) * 0.6));
+        sheen.addColorStopRGBA(0, 1, 1, 1, 0.05);
+        sheen.addColorStopRGBA(1, 1, 1, 1, 0);
+        cr.setSource(sheen);
+        cr.fillPreserve();
+        cr.setSourceRGBA(1, 1, 1, 0.075);
+        cr.setLineWidth(1);
+        cr.strokePreserve();
         cr.newPath();
         cr.$dispose();
     }

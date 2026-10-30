@@ -50,13 +50,26 @@ export class FocusMode {
             return;
         // A paused focus session is still a focus session.
         const focusing = phase === 'focus' && this._settings.get_boolean('focus-dnd');
-        if (focusing && !this._owned && !this._notifications.dnd) {
-            this._owned = true;
-            this._setDnd(true);
+        if (focusing && !this._owned) {
+            if (!this._notifications.dnd) {
+                this._owned = true;
+                this._setDnd(true);
+            } else if (this._timedDndActive) {
+                // A timed Do Not Disturb has it on already; the session shares the claim until one ends.
+                this._owned = true;
+            }
+            // On by the user: the session leaves it theirs.
         } else if (!focusing && this._owned) {
             this._owned = false;
-            this._setDnd(false);
+            // A timed Do Not Disturb still running keeps it on.
+            if (!this._timedDndActive)
+                this._setDnd(false);
         }
+    }
+
+    /** Whether a timed Do Not Disturb still has time left. */
+    get _timedDndActive() {
+        return this._notifications.dndUntil > Date.now();
     }
 
     /** Sets DND without mistaking the change for the user's own. */
@@ -75,7 +88,9 @@ export class FocusMode {
         // leave the desktop as the user had it.
         if (this._owned && !Main.sessionMode.isLocked) {
             this._owned = false;
-            this._setDnd(false);
+            // Leave it on for a timed Do Not Disturb that still has time.
+            if (!this._timedDndActive)
+                this._setDnd(false);
         }
     }
 }

@@ -60,8 +60,12 @@ class ReminderRow extends St.BoxLayout {
 });
 
 // The reminder list, kept in isled's todo store.
-export const TasksPage = GObject.registerClass(
-class TasksPage extends Page {
+export const TasksPage = GObject.registerClass({
+    Signals: {
+        // The ▶ on a reminder: make it the focus session's task (id and title).
+        'focus-task': {param_types: [GObject.TYPE_STRING, GObject.TYPE_STRING]},
+    },
+}, class TasksPage extends Page {
     /** `height` is the expanded island's page height. */
     _init(daemon, {height}) {
         super._init(daemon, {
@@ -307,7 +311,11 @@ class TasksPage extends Page {
         titleBox.add_child(strike);
         content.add_child(titleBox);
 
-        // × appears while the pointer is on the row.
+        // ▶ starts a focus session on it; × deletes it. Both appear while the pointer is on the row.
+        const focus = iconButton('isle-play-symbolic', 'isle-button-flat isle-reminder-focus',
+            () => this.emit('focus-task', String(task.id), task.title),
+            {size: 9, accessibleName: 'Focus on this reminder'});
+        focus.opacity = 0;
         // Once: a double click would ask isled to delete what is already gone.
         let removing = false;
         const remove = iconButton('isle-close-symbolic', 'isle-button-flat isle-reminder-remove', () => {
@@ -317,7 +325,11 @@ class TasksPage extends Page {
             }
         }, {size: 9, accessibleName: 'Delete reminder'});
         remove.opacity = 0;
-        onHover(row, hovered => remove.ease({opacity: hovered ? 255 : 0, duration: 120}));
+        onHover(row, hovered => {
+            focus.ease({opacity: hovered ? 255 : 0, duration: 120});
+            remove.ease({opacity: hovered ? 255 : 0, duration: 120});
+        });
+        content.add_child(focus);
         content.add_child(remove);
         column.add_child(content);
         column.add_child(new St.Widget({style_class: 'isle-reminder-line'}));
