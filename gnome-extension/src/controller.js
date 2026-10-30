@@ -1058,9 +1058,9 @@ export class Controller {
         const scale = uiScale();
         const top = this._inTopBar ? this._topBar.height : 0;
         // The closed island keeps the size it has in the bar on a display without one: moving the island
-        // there must not shrink it (see the compact case below). A panel another extension moved is no
-        // bar to sit in.
-        const inBar = this._settings.get_boolean('island-in-top-bar') && this._inTopBar;
+        // there must not shrink it (see the compact case below). A panel another extension moved to the
+        // bottom has no bar height to take that size from, so it hangs at the notch's.
+        const inBar = this._settings.get_boolean('island-in-top-bar') && this._topBar.height > 0;
         // Before measuring it: inside the bar it is smaller.
         this._compact.inBar = inBar;
 
