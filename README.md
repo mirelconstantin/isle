@@ -33,6 +33,9 @@ small panel with tabs for each page; passing over it on the way elsewhere
 leaves it closed. Alerts for volume, charging, Caps Lock and notifications
 appear in the same place instead of in the middle of the screen.
 
+For what this fork changes and how to take an upstream release, see
+[docs/fork.md](docs/fork.md).
+
 ## Contents
 
 - [What this fork does differently](#what-this-fork-does-differently)
