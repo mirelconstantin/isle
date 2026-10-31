@@ -457,6 +457,20 @@ export class Controller {
         return expanded;
     }
 
+    /** A line typed into the command surface becomes a reminder, its time read as the page reads it. */
+    async _addTask(line) {
+        const answer = await this._daemon.call('todo', 'Parse', line);
+        let parsed = null;
+        if (answer) {
+            try {
+                parsed = JSON.parse(answer);
+            } catch (e) {
+                parsed = null;
+            }
+        }
+        this._daemon.call('todo', 'Add', parsed?.title ?? line, parsed?.due_ms ?? 0);
+    }
+
     /** Starts a focus session on a reminder, and shows the Focus page. */
     _focusTask(id, title) {
         this._settings.set_string('focus-task-id', String(id));
@@ -2221,7 +2235,7 @@ export class Controller {
             }
             break;
         case 'add-task':
-            this._daemon.call('todo', 'Add', data.query, 0);
+            this._addTask(data.query);
             this.expand('reminders');
             break;
         case 'add-event':

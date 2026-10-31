@@ -489,12 +489,12 @@ export const CompactView = GObject.registerClass({
             .sort((a, b) => a.due_ms - b.due_ms)[0] ?? null;
     }
 
-    /** Writes "9m" or, in the last minute, "45s" in the page's orange. */
+    /** Writes "9m" or, under a minute, "45s" in the page's orange. */
     _syncReminder(reminder) {
         if (!reminder)
             return;
         const remaining = Math.max(0, reminder.due_ms - Date.now());
-        const soon = remaining <= 60000;
+        const soon = remaining < 59000;
         const text = soon ? `${Math.max(1, Math.ceil(remaining / 1000))}s` : `${Math.ceil(remaining / 60000)}m`;
         if (this._reminderTime.text !== text)
             this._reminderTime.text = text;
@@ -503,10 +503,12 @@ export const CompactView = GObject.registerClass({
             this._reminderTime.style = style;
     }
 
-    /** How long until the countdown says something else. */
+    /** How long until the countdown says something else: the next second, minute, or its last minute. */
     _reminderWait(reminder) {
         const remaining = Math.max(0, reminder.due_ms - Date.now());
-        return remaining <= 60000 ? remaining % 1000 + 30 : remaining % 60000 + 30;
+        if (remaining < 59000)
+            return remaining % 1000 + 30;
+        return Math.min(remaining - 59000, remaining % 60000) + 30;
     }
 
     /** Puts `sign` in `side`, fading in once on screen: one sign giving way to another reads as a change. */
