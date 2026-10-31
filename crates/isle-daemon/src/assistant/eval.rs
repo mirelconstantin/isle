@@ -51,7 +51,7 @@ impl Agenda {
                 ),
                 "remind" => add(
                     &mut self.reminders,
-                    format!("in {} minutes: {text}", action["minutes"]),
+                    format!("{}: {text}", action["when"].as_str().unwrap_or_default()),
                 ),
                 "done_task" | "remove_task" => self.todos.retain(|(item, _)| Some(*item) != id),
                 "remove_event" => self.events.retain(|(item, _)| Some(*item) != id),

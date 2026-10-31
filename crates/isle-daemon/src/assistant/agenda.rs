@@ -8,12 +8,10 @@ use std::fmt::Write;
 
 use chrono::{DateTime, Days, NaiveDate, TimeZone};
 use isle_core::calendar::Event;
-use isle_core::reminders::Reminder;
 use isle_core::todo::TodoItem;
 use zbus::object_server::InterfaceRef;
 
 use crate::calendar::CalendarService;
-use crate::reminders::RemindersService;
 use crate::todo::TodoService;
 
 /// Each list shows at most this many items.
@@ -27,7 +25,6 @@ const DAYS_AHEAD: u64 = 6;
 pub struct Sources {
     pub todo: InterfaceRef<TodoService>,
     pub calendar: InterfaceRef<CalendarService>,
-    pub reminders: InterfaceRef<RemindersService>,
 }
 
 impl Sources {
@@ -35,30 +32,26 @@ impl Sources {
     pub async fn summary(&self) -> String {
         let todo = self.todo.get().await;
         let calendar = self.calendar.get().await;
-        let reminders = self.reminders.get().await;
         summary(
             todo.list().items(),
             calendar.calendar().events(),
-            reminders.reminders().items(),
             &chrono::Local::now(),
         )
     }
 }
 
-/// Open to-dos, events from today to six days on, and pending reminders, in plain text.
-pub fn summary<Tz: TimeZone>(
-    todos: &[TodoItem],
-    events: &[Event],
-    reminders: &[Reminder],
-    now: &DateTime<Tz>,
-) -> String {
+/// Open to-dos, the reminders among them (those with a time), and events from today to six days on, in
+/// plain text.
+pub fn summary<Tz: TimeZone>(todos: &[TodoItem], events: &[Event], now: &DateTime<Tz>) -> String {
     let mut text = String::new();
 
-    let open = todos.iter().filter(|todo| !todo.done);
+    let open = || todos.iter().filter(|todo| !todo.done);
     list(
         &mut text,
         "Open to-dos",
-        open.map(|todo| format!("[#{}] {}", todo.id, title(&todo.title))),
+        open()
+            .filter(|todo| todo.due_ms.is_none())
+            .map(|todo| format!("[#{}] {}", todo.id, title(&todo.title))),
     );
 
     let today = now.date_naive();
@@ -97,14 +90,10 @@ pub fn summary<Tz: TimeZone>(
     list(
         &mut text,
         "Reminders",
-        reminders.iter().filter_map(|reminder| {
-            let due = DateTime::from_timestamp_millis(reminder.due_ms)?.with_timezone(&timezone);
+        open().filter_map(|todo| {
+            let due = DateTime::from_timestamp_millis(todo.due_ms?)?.with_timezone(&timezone);
             let due = due.naive_local().format("%a %Y-%m-%d %H:%M");
-            Some(format!(
-                "[#{}] {due}: {}",
-                reminder.id,
-                title(&reminder.text)
-            ))
+            Some(format!("[#{}] {due}: {}", todo.id, title(&todo.title)))
         }),
     );
     text.truncate(text.trim_end().len());
@@ -148,6 +137,8 @@ mod tests {
             title: title.into(),
             done,
             done_at_ms: None,
+            due_ms: None,
+            alerted: false,
         }
     }
 
@@ -171,14 +162,18 @@ mod tests {
     #[test]
     fn says_none_for_empty_lists() {
         assert_eq!(
-            summary(&[], &[], &[], &now()),
+            summary(&[], &[], &now()),
             "Open to-dos: none\nCalendar, 2026-10-21 to 2026-10-27: none\nReminders: none"
         );
     }
 
     #[test]
     fn lists_open_todos_the_coming_week_and_reminders_in_local_time() {
-        let todos = [todo(1, "Buy milk", false), todo(2, "Done already", true)];
+        // 2026-10-21 07:30 UTC is 14:30 in UTC+7.
+        let due = now().timestamp_millis() + 4 * 3600 * 1000 + 30 * 60 * 1000;
+        let mut tea = todo(1, "Tea\nnow", false);
+        tea.due_ms = Some(due);
+        let todos = [todo(2, "Buy milk", false), todo(3, "Done already", true), tea];
         let events = [
             event(1, "2026-10-20", None, None, "Yesterday"),
             event(2, "2026-10-21", Some("09:00"), Some("09:15"), "Standup"),
@@ -186,17 +181,10 @@ mod tests {
             event(4, "2026-10-27", Some("20:00"), None, "Dinner"),
             event(5, "2026-10-28", None, None, "Too far"),
         ];
-        // 2026-10-21 07:30 UTC is 14:30 in UTC+7.
-        let due = now().timestamp_millis() + 4 * 3600 * 1000 + 30 * 60 * 1000;
-        let reminders = [Reminder {
-            id: 1,
-            text: "Tea\nnow".into(),
-            due_ms: due,
-        }];
         assert_eq!(
-            summary(&todos, &events, &reminders, &now()),
+            summary(&todos, &events, &now()),
             "Open to-dos:\n\
-             - [#1] Buy milk\n\
+             - [#2] Buy milk\n\
              Calendar, 2026-10-21 to 2026-10-27:\n\
              - [#3] Wed 2026-10-21, all day: Holiday\n\
              - [#2] Wed 2026-10-21, 09:00-09:15: Standup\n\
@@ -209,7 +197,7 @@ mod tests {
     #[test]
     fn caps_long_lists_and_titles() {
         let todos: Vec<TodoItem> = (0..20).map(|id| todo(id, "x", false)).collect();
-        let text = summary(&todos, &[], &[], &now());
+        let text = summary(&todos, &[], &now());
         assert_eq!(text.matches("] x\n").count(), MAX_ITEMS);
         assert!(text.contains("- and 5 more\n"));
         assert_eq!(title(&"a".repeat(150)), format!("{}…", "a".repeat(100)));

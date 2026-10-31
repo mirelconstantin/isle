@@ -774,8 +774,8 @@ impl Session {
              - focus {{command: start | stop}}: the focus (pomodoro) timer\n\
              - add_task {{text}}: a to-do; done_task {{id}} ticks one off, remove_task {{id}} deletes it\n\
              - add_event {{date: YYYY-MM-DD, text}}: a calendar event; put its time in the text, e.g. \"Dinner 8:00 pm\"\n\
-             - remind {{minutes, text}}: a reminder shown that many minutes from now; cancel_reminder {{id}} \
-             cancels one\n\
+             - remind {{when, text}}: a reminder; when is when it is due, as words (\"in 10 minutes\", \
+             \"tomorrow 9am\", \"monday 17:00\", \"on 3 Nov 09:00\"); cancel_reminder {{id}} cancels one\n\
              - remove_event {{id}}: deletes a calendar event\n\
              The ids are the [#n] in what Isle knows. To change a to-do, event or reminder, remove it and add the \
              new one; never leave the old one behind.\n\

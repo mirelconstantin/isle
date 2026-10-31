@@ -76,9 +76,15 @@ if the player then rejects the command, isled only logs it.
 
 | Member | Signature | |
 |---|---|---|
-| `Add(s text) → t id` | | Adds a task; a blank title is refused. |
+| `Add(s text, t due_ms) → t id` | | Adds a task due at `due_ms` (milliseconds since the epoch), or with no time for `0`; a blank title is refused, and nothing more than a year ahead. |
+| `SetDue(t id, t due_ms)` | | Changes when a task is due (`0` clears it), as a snooze or a changed time does; it may be shown again afterwards. |
+| `SetAlerted(t id, b alerted)` | | Notes that its due alert was shown, so it is not shown again after a restart. |
+| `Parse(s text) → s` | | How a reminder line is read, without adding it: `{title, due_ms}` (`due_ms` 0 when it has no time). The time of day comes from `Calendar1.Parse`; on top of it, `today`, `tomorrow`, `tonight`, `monday`…`sunday`, `on 3 Nov` and `in 10 min`/`in 2h` are read. Fails (InvalidArgs) when no title is left. |
 | `SetDone(t id, b done)`, `Rename(t id, s title)`, `Remove(t id)`, `ClearDone()` | | Finished tasks are cleared at midnight. |
-| `Items` | `s` | `[{id, title, done, done_at_ms}]`; `done_at_ms` is when the task was ticked off, or null. |
+| `Items` | `s` | `[{id, title, done, done_at_ms, due_ms, alerted}]`; `done_at_ms` is when the task was ticked off, or null; `due_ms` is when it is due, or null; `alerted` is whether its due alert was shown. |
+
+A task with a `due_ms` is a reminder: the extension shows it as an alert when it is due, and the
+Reminders page lists it with its time.
 
 ## io.github.zickrian.isle.Calendar1
 
@@ -158,18 +164,6 @@ files) moves that item to the top and returns its id; it stays pinned if
 it was. Beyond 20 unpinned items the oldest are dropped, and so are those
 older than `SetRetention` allows; pinned items are only removed by hand.
 Unknown ids and invalid content are rejected with `InvalidArgs`.
-
-## io.github.zickrian.isle.Reminders1
-
-Reminders the voice assistant sets ("remind me in ten minutes to…"), kept in
-`~/.local/share/isle/reminders.json`. The extension shows each as an alert
-when it is due, then dismisses it.
-
-| Member | Signature | |
-|---|---|---|
-| `Add(t delay_ms, s text) → t id` | | A reminder due `delay_ms` from now. |
-| `Dismiss(t id)` | | Forgets one, once shown (or cancelled). |
-| `Items` | `s` | `[{id, text, due_ms}]`, soonest first. |
 
 ## io.github.zickrian.isle.AppUsage1
 

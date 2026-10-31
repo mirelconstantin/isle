@@ -3,14 +3,19 @@
 
 use std::sync::Arc;
 
+use chrono::{Duration, Local, NaiveDateTime, TimeZone};
 use isle_core::todo::TodoList;
+use isle_core::when;
 use log::warn;
 use tokio::sync::Notify;
 use zbus::object_server::{InterfaceRef, SignalEmitter};
 use zbus::{fdo, interface};
 
 use crate::clock::{next_midnight, now_ms, start_of_today, wait_until};
-use crate::store::Store;
+use crate::store::{Store, data_dir};
+
+/// The furthest a reminder may be set ahead: a year.
+const MAX_AHEAD_MS: i64 = 366 * 24 * 60 * 60 * 1000;
 
 /// The to-do list on the bus, saved to disk after every change.
 pub struct TodoService {
@@ -20,11 +25,14 @@ pub struct TodoService {
 }
 
 impl TodoService {
-    /// Loads the saved list, dropping tasks finished before today.
+    /// Loads the saved list, dropping tasks finished before today and folding in the timed reminders the
+    /// assistant used to keep apart (`reminders.json`).
     pub fn load() -> Self {
         let mut store = Store::new("todo");
         let mut list: TodoList = store.load();
-        if list.drop_done_before(start_of_today()) {
+        let dropped = list.drop_done_before(start_of_today());
+        let folded = adopt_reminders(&mut list, &data_dir().join("reminders.json"));
+        if dropped || folded {
             store.save(&list);
         }
         Self {
@@ -47,6 +55,62 @@ impl TodoService {
     }
 }
 
+/// A due time from the bus: 0 is none, and nothing is more than a year away.
+fn due_from(due_ms: i64) -> fdo::Result<Option<i64>> {
+    if due_ms <= 0 {
+        return Ok(None);
+    }
+    if due_ms - now_ms() > MAX_AHEAD_MS {
+        return Err(fdo::Error::InvalidArgs("a reminder is at most a year away".into()));
+    }
+    Ok(Some(due_ms))
+}
+
+/// Epoch milliseconds for a local wall-clock time; one in a DST gap moves an hour on.
+fn epoch_ms(at: NaiveDateTime) -> i64 {
+    let later = at + Duration::hours(1);
+    Local
+        .from_local_datetime(&at)
+        .earliest()
+        .or_else(|| Local.from_local_datetime(&later).earliest())
+        .map(|at| at.timestamp_millis())
+        .unwrap_or_else(|| at.and_utc().timestamp_millis())
+}
+
+/// Folds `reminders.json` (what `Reminders1` kept) into the list, once, and moves the file aside.
+fn adopt_reminders(list: &mut TodoList, path: &std::path::Path) -> bool {
+    /// The old file's shape; only what is needed to keep the reminders.
+    #[derive(serde::Deserialize)]
+    struct Old {
+        items: Vec<OldReminder>,
+    }
+    #[derive(serde::Deserialize)]
+    struct OldReminder {
+        text: String,
+        due_ms: i64,
+    }
+
+    let Ok(bytes) = std::fs::read(path) else {
+        return false;
+    };
+    let Ok(old) = serde_json::from_slice::<Old>(&bytes) else {
+        warn!("could not read {}; the timed reminders were left as they are", path.display());
+        return false;
+    };
+    for reminder in old.items {
+        list.add(&reminder.text, Some(reminder.due_ms));
+    }
+    // Kept aside rather than deleted: nothing is lost if the fold was wrong. Moved or emptied either way,
+    // so the next start does not fold the same reminders in twice.
+    if let Err(err) = std::fs::rename(path, path.with_extension("json.migrated")) {
+        warn!("could not move {} aside: {err}; emptying it instead", path.display());
+        if let Err(err) = std::fs::write(path, br#"{"items":[],"next_id":0}"#) {
+            warn!("could not empty {}: {err}", path.display());
+        }
+    }
+    true
+}
+
 /// The error for a task id that is not on the list.
 fn not_found(id: u64) -> fdo::Error {
     fdo::Error::InvalidArgs(format!("no task with id {id}"))
@@ -54,18 +118,58 @@ fn not_found(id: u64) -> fdo::Error {
 
 #[interface(name = "io.github.zickrian.isle.Todo1")]
 impl TodoService {
-    /// Adds a task and returns its id.
+    /// Adds a task due at `due_ms` (0 for none) and returns its id.
     async fn add(
         &mut self,
         text: &str,
+        due_ms: i64,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> fdo::Result<u64> {
+        let due = due_from(due_ms)?;
         let id = self
             .list
-            .add(text)
+            .add(text, due)
             .ok_or_else(|| fdo::Error::InvalidArgs("a task needs a title".into()))?;
         self.changed(&emitter).await?;
         Ok(id)
+    }
+
+    /// Sets when a task is due (`due_ms` 0 clears it), as a snooze or a changed time does.
+    async fn set_due(
+        &mut self,
+        id: u64,
+        due_ms: i64,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+    ) -> fdo::Result<()> {
+        let due = due_from(due_ms)?;
+        if !self.list.set_due(id, due) {
+            return Err(not_found(id));
+        }
+        Ok(self.changed(&emitter).await?)
+    }
+
+    /// Reads a line as a reminder: `{title, due_ms}` (`due_ms` 0 when it has no time), as the Reminders
+    /// page and the assistant read it.
+    async fn parse(&self, text: &str) -> fdo::Result<String> {
+        let when = when::parse(text, Local::now().naive_local());
+        if when.title.trim().is_empty() {
+            return Err(fdo::Error::InvalidArgs("a reminder needs a title".into()));
+        }
+        let due = when.at.map(epoch_ms).unwrap_or(0);
+        Ok(serde_json::json!({"title": when.title, "due_ms": due}).to_string())
+    }
+
+    /// Notes that a task's due alert was shown (`alerted` false puts it back in line for one).
+    async fn set_alerted(
+        &mut self,
+        id: u64,
+        alerted: bool,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+    ) -> fdo::Result<()> {
+        if !self.list.set_alerted(id, alerted) {
+            return Err(not_found(id));
+        }
+        Ok(self.changed(&emitter).await?)
     }
 
     /// Ticks a task off, or back on.
@@ -138,5 +242,39 @@ pub async fn run(iface: InterfaceRef<TodoService>) {
         if let Err(err) = service.changed(iface.signal_emitter()).await {
             warn!("could not clear yesterday's tasks: {err}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A file of its own, so tests do not share one.
+    fn path(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("isle-todo-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("reminders.json")
+    }
+
+    #[test]
+    fn the_old_reminders_are_folded_in_once() {
+        let path = path("fold");
+        std::fs::write(&path, r#"{"items":[{"id":1,"text":"Tea","due_ms":1000},{"id":2,"text":"Bank","due_ms":2000}],"next_id":2}"#).unwrap();
+        let mut list = TodoList::default();
+        assert!(adopt_reminders(&mut list, &path));
+        let titles: Vec<_> = list.items().iter().map(|item| item.title.as_str()).collect();
+        assert_eq!(titles, ["Tea", "Bank"]);
+        assert_eq!(list.items()[0].due_ms, Some(1000));
+        // The file is out of the way, so a second start does not add them again.
+        assert!(!path.exists());
+        assert!(!adopt_reminders(&mut list, &path));
+        assert_eq!(list.items().len(), 2);
+    }
+
+    #[test]
+    fn no_old_file_changes_nothing() {
+        let mut list = TodoList::default();
+        assert!(!adopt_reminders(&mut list, &path("none")));
+        assert!(list.items().is_empty());
     }
 }

@@ -2204,7 +2204,7 @@ export class Controller {
             }
             break;
         case 'add-task':
-            this._daemon.call('todo', 'Add', data.query);
+            this._daemon.call('todo', 'Add', data.query, 0);
             this.expand('reminders');
             break;
         case 'add-event':

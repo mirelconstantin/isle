@@ -189,7 +189,7 @@ export const TasksPage = GObject.registerClass({
         if (!text)
             return;
         this._entry.text = '';
-        await this.daemon.call('todo', 'Add', text);
+        await this.daemon.call('todo', 'Add', text, 0);
         this._revealNew();
     }
 

@@ -48,7 +48,10 @@ const INTERFACES = {
     },
     todo: {
         xml: node('Todo1', `
-            <method name="Add"><arg name="text" type="s" direction="in"/><arg type="t" direction="out"/></method>
+            <method name="Add"><arg name="text" type="s" direction="in"/><arg name="due_ms" type="t" direction="in"/><arg type="t" direction="out"/></method>
+            <method name="SetDue"><arg name="id" type="t" direction="in"/><arg name="due_ms" type="t" direction="in"/></method>
+            <method name="SetAlerted"><arg name="id" type="t" direction="in"/><arg name="alerted" type="b" direction="in"/></method>
+            <method name="Parse"><arg name="text" type="s" direction="in"/><arg type="s" direction="out"/></method>
             <method name="SetDone"><arg name="id" type="t" direction="in"/><arg name="done" type="b" direction="in"/></method>
             <method name="Rename"><arg name="id" type="t" direction="in"/><arg name="title" type="s" direction="in"/></method>
             <method name="Remove"><arg name="id" type="t" direction="in"/></method>
@@ -97,13 +100,6 @@ const INTERFACES = {
             <signal name="Event"><arg name="event" type="s"/></signal>
             <property name="State" type="s" access="read"/>`),
         properties: {State: 'system'},
-    },
-    reminders: {
-        xml: node('Reminders1', `
-            <method name="Add"><arg name="delay_ms" type="t" direction="in"/><arg name="text" type="s" direction="in"/><arg type="t" direction="out"/></method>
-            <method name="Dismiss"><arg name="id" type="t" direction="in"/></method>
-            <property name="Items" type="s" access="read"/>`),
-        properties: {Items: 'reminders'},
     },
     appUsage: {
         xml: node('AppUsage1', `

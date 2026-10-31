@@ -9,6 +9,8 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+# Local wall-clock dates for reading a reminder's "when" (no clock: `now` is passed in).
+chrono.workspace = true
 serde.workspace = true
 
 [dev-dependencies]
