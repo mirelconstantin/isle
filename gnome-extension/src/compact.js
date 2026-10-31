@@ -151,6 +151,13 @@ export const CompactView = GObject.registerClass({
         // The timer's time left, right of its ring, as large as the clock and level with it.
         this._timerTime = new St.Label({style_class: 'isle-compact-second-time', y_align: Clutter.ActorAlign.CENTER});
         this._timerTime.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+        // A reminder close by: a bell and how long is left, in the right slot when nothing else needs it.
+        this._reminder = new St.BoxLayout({style_class: 'isle-compact-reminder', y_align: Clutter.ActorAlign.CENTER});
+        this._reminderIcon = new St.Icon({gicon: icon('isle-bell'), icon_size: 15, y_align: Clutter.ActorAlign.CENTER});
+        this._reminderTime = new St.Label({style_class: 'isle-compact-second-time', y_align: Clutter.ActorAlign.CENTER});
+        this._reminderTime.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+        this._reminder.add_child(this._reminderIcon);
+        this._reminder.add_child(this._reminderTime);
         // The next activity's sign: the timer's ring, a song's cover, a call's green phone (its length is on the open
         // island's pages).
         this._secondRing = new Ring({size: 20, lineWidth: 3});
@@ -173,7 +180,7 @@ export const CompactView = GObject.registerClass({
         row.add_child(this._rightSide);
 
         this._daemonChanged = daemon.connect('changed', (_daemon, key) => {
-            if (['nowPlaying', 'pomodoro'].includes(key))
+            if (['nowPlaying', 'pomodoro', 'tasks'].includes(key))
                 this._refresh();
         });
         this._settingsChanged = settings.connect('changed::privacy-indicators', () => this._refresh());
@@ -246,7 +253,8 @@ export const CompactView = GObject.registerClass({
         // size from before (a paused timer's time ran past the island's end so).
         const dots = this._privacyDots.visible ? widthOf(this._privacyDots) : 0;
         // Text last on the right keeps further in than a round sign.
-        const text = this._right.child === this._timerTime && !dots ? Math.round(px(Math.max(0, TEXT_INSET[place] - inset))) : 0;
+        const atEnd = this._right.child === this._timerTime || this._right.child === this._reminder;
+        const text = atEnd && !dots ? Math.round(px(Math.max(0, TEXT_INSET[place] - inset))) : 0;
         const right = this._right.visible ? Math.max(square, widthOf(this._right.child) + text) : 0;
         setWidth(this._right, right || square);
         const spacing = right && dots && stage ? this._trail.get_theme_node().get_length('spacing') : 0;
@@ -410,6 +418,11 @@ export const CompactView = GObject.registerClass({
         // activity's sign, what goes with the first (the song's bars, the timer's time left).
         let right = second ? {music: this._secondArt, timer: this._secondRing, call: this._secondPhone}[second]
             : {music: this._bars, timer: anyDot ? null : this._timerTime}[primary] ?? null;
+        // A reminder inside its heads-up window takes the right slot, and gives it up to anything else.
+        const reminder = this._nextReminder();
+        this._syncReminder(reminder);
+        if (!right && reminder)
+            right = this._reminder;
         if (onCall && this._call.muted)
             right = this._micOff;
         if (this._assistantBusy)
@@ -458,6 +471,42 @@ export const CompactView = GObject.registerClass({
         this._fit();
         if (this.preferredWidth !== widthBefore)
             this.emit('width-changed');
+        // The countdown changes by itself: look again when it does (the last minute counts seconds).
+        if (reminder && this.mapped)
+            this._later('reminder', this._reminderWait(reminder), () => this._refresh());
+        else
+            this._cancel('reminder');
+    }
+
+    /** The next reminder inside its heads-up window, or null. */
+    _nextReminder() {
+        const lead = Math.max(0, this._settings.get_int('reminder-alert-minutes')) * 60000;
+        if (!lead)
+            return null;
+        const now = Date.now();
+        return (this._daemon.state.tasks ?? [])
+            .filter(task => !task.done && task.due_ms > now && task.due_ms - now <= lead)
+            .sort((a, b) => a.due_ms - b.due_ms)[0] ?? null;
+    }
+
+    /** Writes "9m" or, in the last minute, "45s" in the page's orange. */
+    _syncReminder(reminder) {
+        if (!reminder)
+            return;
+        const remaining = Math.max(0, reminder.due_ms - Date.now());
+        const soon = remaining <= 60000;
+        const text = soon ? `${Math.max(1, Math.ceil(remaining / 1000))}s` : `${Math.ceil(remaining / 60000)}m`;
+        if (this._reminderTime.text !== text)
+            this._reminderTime.text = text;
+        const style = soon ? 'color: #ff9f0a;' : null;
+        if (this._reminderTime.style !== style)
+            this._reminderTime.style = style;
+    }
+
+    /** How long until the countdown says something else. */
+    _reminderWait(reminder) {
+        const remaining = Math.max(0, reminder.due_ms - Date.now());
+        return remaining <= 60000 ? remaining % 1000 + 30 : remaining % 60000 + 30;
     }
 
     /** Puts `sign` in `side`, fading in once on screen: one sign giving way to another reads as a change. */

@@ -214,6 +214,9 @@
 /* As large as the clock and on its line: the two times read as one row. */
 .isle-compact-second-time { font-size: 17px; font-weight: 600; letter-spacing: -0.2px; }
 .isle-compact-in-bar .isle-compact-second-time { font-size: 15px; letter-spacing: -0.1px; }
+/* A reminder close by: its bell, then how long is left. */
+.isle-compact-reminder { spacing: 6px; }
+.isle-compact-reminder .isle-compact-second-time { margin-top: 0; }
 
 /* ── Alerts (peek) ────────────────────────────────────── */
 
