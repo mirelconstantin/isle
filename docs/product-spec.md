@@ -245,9 +245,12 @@ and apps show only once there is a word, so the empty surface stays short.
   | Timer with privacy dots | its ring | the dots |
   | Call and music | green phone | the song's cover |
   | Music and timer | cover art | the timer's ring |
+  | A reminder inside its heads-up window, nothing else | – | a bell and the time left |
 
   The timer's glyph, ring and time are white while focusing and green on a break, and dim while
-  paused. The bars dance only while the song plays and the closed island is on screen, and rest
+  paused. A reminder's countdown takes the right slot only when nothing else needs it ("9m", and the
+  last minute counts seconds in the page's orange); a song's bars, the timer's time, a muted call and
+  the assistant all come first. The bars dance only while the song plays and the closed island is on screen, and rest
   after a minute without input; paused, they rest and dim, and the cover stays until the player
   closes.
 - Privacy dots, in the same island after the right side's sign: green camera, orange microphone,
@@ -464,14 +467,31 @@ hairline that runs from the text to the edge (a long title wraps over as
 many lines as it needs, the ring by its first line), scrolling past what
 fits, and a
 last faint row "New Reminder" (Enter adds and stays ready, Esc stops; + puts
-the cursor there). Clicking the title renames it in place (Enter or clicking
-away saves, Esc cancels); ▶ and × appear on hover, ▶ starting a focus
-session on it. Ticking one fills its ring
-with an orange dot and strikes the title through at once; it lingers 0.9 s
+the cursor there).
+
+A reminder may carry a time, and the line says it: "Call the bank tomorrow
+17:00" is read by isled (`Todo1.Parse`: a time of day, `today`, `tomorrow`,
+`tonight`, a weekday, `on 3 Nov`, `in 10 min`), and the new row shows what it
+read as a chip at its right ("Tomorrow 17:00"); a line with no time is a plain
+to-do. Rows are ordered late first, then the soonest, then the untimed as they
+were added, and each says its time at the right: "17:00", "Tomorrow 09:30",
+"Tue 09:00", or "12m late" in the page's orange, said again every half minute
+while the page is open. Clicking that time opens a field the same parser reads
+back (empty clears it). Clicking the title renames it in place (Enter or
+clicking away saves, Esc cancels). ▶ and × take the time's place while the
+pointer is on the row or it has the keyboard, ▶ starting a focus session on it.
+
+The list takes the keyboard: ↑ ↓ move between rows (and past the last one into
+the new row's field), Space ticks, Enter renames, Delete removes, and a click
+on a row's own space gives it the keyboard.
+
+Ticking one fills its ring
+with an orange dot and strikes the title through at once (a wrapped title,
+along its first line); it lingers 0.9 s
 (a second tap undoes it), then fades and folds away, the rows below sliding
-up. Closing the island in that moment keeps it done. Empty: "No Reminders",
-or "All Done" once today's are ticked off. Done ones are cleared at
-midnight.
+up. Closing the island in that moment keeps it done. Empty: "No reminders ·
+type above, or press Super+K", or "All done" once today's are ticked off. Done
+ones are cleared at midnight.
 
 **Calendar** (title "Calendar"), as a calendar widget. Left: the
 month in red capitals with the year (click: back to today) and ‹ › to move
@@ -560,7 +580,8 @@ banner does. Right-clicking an alert puts it away without opening it.
 | Timer phase ends (+ chime) | timer | Focus session done… | Start break | 8 s |
 | Screen recording started | red record icon | Recording screen | Stop | 2.6 s |
 | Notification (GNOME's sound) | app icon, large | title / first line (only who it is from while the screen is shared) | its first button ("Mark as read") | 4 s; passing (a screenshot taken) 2.5 s; critical 20 s, instant and sticky |
-| Reminder (+ chime) | bell | the reminder | – | 8 s, sticky |
+| Reminder about to be due (Settings: 0–60 min before, 10 by default) | bell | the reminder in 10 min / 17:00 · Reminder | – | 6 s, no sound |
+| Reminder (+ chime) | bell | the reminder / 17:00 · Reminder | Snooze 10 min, Done | 8 s, sticky |
 | Assistant done in the background (resting the pointer holds it; it opens no page) | mic | the answer / Isle Assistant (· Click to read more, when cut) | – | as long as it takes to read, at most 8 s |
 | Isle's service stopped | warning | Isle's service isn't running | Restart | 8 s |
 | Newer Isle (once per version) | update | Isle 0.x is out | How | 8 s |

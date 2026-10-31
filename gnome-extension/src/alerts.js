@@ -382,11 +382,10 @@ export function usage(provider, window, percent, resetsAt, critical) {
     };
 }
 
-/** A reminder the voice assistant set ("remind me in ten minutes to..."). `onShown` once on screen. */
 /** A clock time for an alert's subtitle ("17:00", "5:00 PM"). */
 const clockOf = ms => Format.timeOfDay(GLib.DateTime.new_from_unix_local(Math.floor(ms / 1000)));
 
-/** A reminder at its hour: sticky, with its chime, Done and Snooze. */
+/** A reminder at its hour ("Call the bank", "17:00 · Reminder"): sticky, with its chime, Done and Snooze. */
 export function reminder({id, text, due_ms}, onShown, {onDone, onSnooze} = {}) {
     return {
         // Its own key, so reminders due together queue instead of replacing each other.
