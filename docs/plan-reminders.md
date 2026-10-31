@@ -114,9 +114,10 @@ it is dismissed, without moving the clock.
 
 ### 4 — The page's polish
 
-**Partly done**: a wrapped title's strike follows its first line; a failed add keeps the typed words (isled's
-own alert says why); the empty state teaches. **Left**: the right slot's time ↔ ▶ × swap, and the keyboard
-(↑/↓, Space, Enter, Delete).
+**Done**: the time holds the right edge and ▶/× take its place under the pointer or the keyboard; a wrapped
+title's strike follows its first line; the list takes the keyboard (↑/↓ between rows — past the last one,
+into the new-reminder field — Space ticks, Enter renames, Delete removes); a failed add keeps the typed words
+(isled's own alert says why); the empty state teaches.
 
 - The right slot belongs to the time; ▶ and × take it under the pointer (and
   when the row has focus), so no width is reserved and nothing reflows.

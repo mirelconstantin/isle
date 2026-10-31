@@ -741,6 +741,8 @@
   font-feature-settings: "tnum";
 }
 .isle-reminder-when.late { color: #ff9f0a; }
+/* The ▶ and × that take the time's place while a row is lit. */
+.isle-reminder-actions { spacing: 2px; }
 /* The line being typed, as quiet as the hint it stands in for. */
 .isle-reminder-new-when { color: rgba(255, 255, 255, 0.55); }
 .isle-reminder-when-field { font-size: 11px; }
@@ -1166,7 +1168,8 @@
 
 /* A quiet ring for the keyboard, on the controls that take it: 2px, inside, never a colour alone. */
 .isle-tab:focus, .isle-segment:focus, .isle-pill-small:focus, .isle-notification-row:focus,
-.isle-cal-today:focus, .isle-output-button:focus, .isle-start-pill:focus, .isle-shelf-paste-next:focus {
+.isle-cal-today:focus, .isle-output-button:focus, .isle-start-pill:focus, .isle-shelf-paste-next:focus,
+.isle-reminder:focus {
   box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.62);
 }
 

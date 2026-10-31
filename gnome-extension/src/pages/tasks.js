@@ -432,15 +432,14 @@ export const TasksPage = GObject.registerClass({
             this._startWhen(when, task);
             return Clutter.EVENT_STOP;
         });
-        content.add_child(when);
         row._when = when;
         row._task = task;
 
-        // ▶ starts a focus session on it; × deletes it. Both appear while the pointer is on the row.
+        // ▶ starts a focus session on it; × deletes it. Both take the time's place while the row is lit: under
+        // the pointer, or with the keyboard in it.
         const focus = iconButton('isle-play-symbolic', 'isle-button-flat isle-reminder-focus',
             () => this.emit('focus-task', String(task.id), task.title),
             {size: 9, accessibleName: 'Focus on this reminder'});
-        focus.opacity = 0;
         // Once: a double click would ask isled to delete what is already gone.
         let removing = false;
         const remove = iconButton('isle-close-symbolic', 'isle-button-flat isle-reminder-remove', () => {
@@ -449,19 +448,88 @@ export const TasksPage = GObject.registerClass({
                 this.daemon.call('todo', 'Remove', task.id);
             }
         }, {size: 9, accessibleName: 'Delete reminder'});
-        remove.opacity = 0;
-        onHover(row, hovered => {
-            focus.ease({opacity: hovered ? 255 : 0, duration: 120});
-            remove.ease({opacity: hovered ? 255 : 0, duration: 120});
+        // The row is the control: its buttons are a pointer's shortcut, and the keyboard has its own keys.
+        focus.can_focus = remove.can_focus = false;
+        const actions = new St.BoxLayout({style_class: 'isle-reminder-actions', x_align: Clutter.ActorAlign.END,
+            y_align: Clutter.ActorAlign.CENTER, opacity: 0, reactive: false});
+        actions.add_child(focus);
+        actions.add_child(remove);
+        // One slot at the right: the time, and the buttons over it, so neither is laid out beside the other.
+        when.x_align = Clutter.ActorAlign.END;
+        const slot = new St.Widget({layout_manager: new Clutter.BinLayout(), x_expand: false,
+            y_align: Clutter.ActorAlign.START});
+        slot.add_child(when);
+        slot.add_child(actions);
+        content.add_child(slot);
+
+        /** Lit: the pointer on it, or the keyboard in it. The buttons only take clicks while they show. */
+        const lit = on => {
+            actions.reactive = on;
+            actions.ease({opacity: on ? 255 : 0, duration: 120});
+            when.ease({opacity: on ? 0 : 255, duration: 120});
+        };
+        onHover(row, hovered => lit(hovered || row._focused));
+        row.can_focus = true;
+        row.connect('key-focus-in', () => {
+            row._focused = true;
+            lit(true);
         });
-        content.add_child(focus);
-        content.add_child(remove);
+        row.connect('key-focus-out', () => {
+            row._focused = false;
+            lit(false);
+        });
+        row.connect('key-press-event', (_row, event) => this._rowKey(event, task, row, {check, titleBox, title}));
+        // A click on the row itself (not on its title or its buttons) gives it the keyboard, so ↑/↓ work.
+        row.connect('button-release-event', (_row, event) => {
+            if (event.get_button() === Clutter.BUTTON_PRIMARY && !row._focused) {
+                this.emit('request-keyboard', true);
+                row.grab_key_focus();
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
         column.add_child(content);
         column.add_child(new St.Widget({style_class: 'isle-reminder-line'}));
         row.add_child(column);
 
         check.connect('clicked', () => this._tick(task, {row, check, dot, title, strike}));
         return row;
+    }
+
+    /** The keyboard in a row: ↑/↓ between them, Space ticks, Enter renames, Delete removes. */
+    _rowKey(event, task, row, {check, titleBox, title}) {
+        const key = event.get_key_symbol();
+        if (key === Clutter.KEY_Up || key === Clutter.KEY_Down) {
+            this._focusRow(row, key === Clutter.KEY_Up ? -1 : 1);
+            return Clutter.EVENT_STOP;
+        }
+        if (key === Clutter.KEY_space) {
+            check.emit('clicked');
+            return Clutter.EVENT_STOP;
+        }
+        if (key === Clutter.KEY_Return || key === Clutter.KEY_KP_Enter) {
+            if (this._renaming === null && !this._leaving.has(task.id))
+                this._startRenaming(titleBox, title, task);
+            return Clutter.EVENT_STOP;
+        }
+        if (key === Clutter.KEY_Delete || key === Clutter.KEY_BackSpace) {
+            this.daemon.call('todo', 'Remove', task.id);
+            return Clutter.EVENT_STOP;
+        }
+        return Clutter.EVENT_PROPAGATE;
+    }
+
+    /** Moves the keyboard `delta` rows on; past the last one, into the new-reminder field. */
+    _focusRow(row, delta) {
+        const rows = this._list.get_children().filter(child => child instanceof ReminderRow);
+        const next = rows[rows.indexOf(row) + delta];
+        if (!next && delta > 0) {
+            this._focusNew();
+            return;
+        }
+        if (!next)
+            return;
+        this.emit('request-keyboard', true);
+        next.grab_key_focus();
     }
 
     // Ticks a reminder: the ring turns orange with a dot in it, the title is struck through, it lingers
