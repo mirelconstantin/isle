@@ -8,6 +8,11 @@ ships, and delete this file.
 Baseline: the fork after the v1.5.1 merge (`531a14b`). See
 [fork.md](fork.md) for what is ours and what is upstream's.
 
+**Status: shipped** (phases 0–5, commits `003f3e6`…`53cd6c5`). The one thing no
+check here can prove is the island's behaviour in a live GNOME Shell: the
+countdown's place in the closed island and a two-line title's strike are the
+first things to look at after a log out and back in.
+
 ## Scope
 
 In: one list with a due time; setting it from a line, the command surface or
