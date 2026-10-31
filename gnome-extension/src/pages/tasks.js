@@ -7,6 +7,7 @@
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
+import Pango from 'gi://Pango';
 import St from 'gi://St';
 
 import {VERTICAL, onUiScale} from '../compat.js';
@@ -28,6 +29,19 @@ const WHEN_MS = 30 * 1000;
 /** The strike drawn across the title, and a new reminder opening its row. */
 const STRIKE_MS = 180;
 const ARRIVE_MS = 220;
+
+/** The middle of a title's first line, in the title's own coordinates; null when it is one line (or not laid out). */
+function firstLineMiddle(title) {
+    try {
+        const layout = title.clutter_text.get_layout();
+        if (!layout || layout.get_line_count() < 2)
+            return null;
+        const [logical] = layout.get_line(0).get_extents();
+        return (logical.y + logical.height / 2) / Pango.SCALE;
+    } catch (e) {
+        return null;
+    }
+}
 
 /** A clock time, as GNOME's 12/24-hour setting writes it ("17:00", "5:00 PM"). */
 const clock = date => Format.timeOfDay(GLib.DateTime.new_from_unix_local(Math.floor(date.getTime() / 1000)));
@@ -250,9 +264,15 @@ export const TasksPage = GObject.registerClass({
         // The title without the time words, as isled read them; the raw text when it could not be asked.
         const title = parsed?.title?.trim() || text;
         const due = parsed?.due_ms > 0 ? parsed.due_ms : 0;
-        this._entry.text = '';
-        this._setParsed(null);
         const id = await this.daemon.call('todo', 'Add', title, due);
+        // isled could not be asked: the words stay where they are, and its own alert says why.
+        if (!Number.isInteger(id))
+            return;
+        // Only if nothing was typed meanwhile.
+        if (this._entry.text.trim() === text) {
+            this._entry.text = '';
+            this._setParsed(null);
+        }
         this._revealTask(id);
     }
 
@@ -333,7 +353,7 @@ export const TasksPage = GObject.registerClass({
         }
         this._known = new Set(shown.map(task => task.id));
         this._empty.visible = shown.length === 0;
-        this._empty.text = tasks.length > shown.length ? 'All done' : 'No reminders';
+        this._empty.text = tasks.length > shown.length ? 'All done' : 'No reminders · type above, or press Super+K';
     }
 
     /** Opens `row` from nothing to its height, fading in, while the rows below make room. */
@@ -470,6 +490,12 @@ export const TasksPage = GObject.registerClass({
             strike.remove_transition('scale-x');
             strike.ease({scale_x: 0, duration: STRIKE_MS, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
             return;
+        }
+        // A wrapped title: the strike goes on its first line, not between them.
+        const middle = firstLineMiddle(title);
+        if (middle !== null) {
+            strike.y_align = Clutter.ActorAlign.START;
+            strike.margin_top = Math.max(0, Math.round(middle - 1));
         }
         // The text's own width, as laid out (cut short with … when long); measured before restyling.
         // The strike's box, not the title's: the title is off it while being renamed.

@@ -99,6 +99,10 @@ the chime, and Snooze moves it ten minutes on.
 
 ### 3 — Getting closer in the closed island
 
+**Done**: within the heads-up window the closed island shows a bell and the time left ("9m", seconds in the
+last minute, in the page's orange) in its right slot — and gives the slot up to the song's bars, the timer's
+time, a muted call or the assistant.
+
 - A bell sign and its countdown take the right slot within the lead window:
   `9m` in white, `45s` in the page's orange for the last minute.
 - `compact.js`: `reminder` joins the activities after the timer; the countdown
@@ -109,6 +113,10 @@ Done when: a reminder ten minutes out shows beside the clock and disappears when
 it is dismissed, without moving the clock.
 
 ### 4 — The page's polish
+
+**Partly done**: a wrapped title's strike follows its first line; a failed add keeps the typed words (isled's
+own alert says why); the empty state teaches. **Left**: the right slot's time ↔ ▶ × swap, and the keyboard
+(↑/↓, Space, Enter, Delete).
 
 - The right slot belongs to the time; ▶ and × take it under the pointer (and
   when the row has focus), so no width is reserved and nothing reflows.
