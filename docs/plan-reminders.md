@@ -42,6 +42,10 @@ reminders (removed upstream on purpose).
 
 ### 0 — The when-parser and the one list
 
+**Done** (`003f3e6`): `when.rs` with its tests, `TodoItem.due_ms`/`alerted`, `Todo1`'s
+`Add(text, due_ms)`/`SetDue`/`SetAlerted`/`Parse`, `reminders.json` folded into `todo.json`,
+`Reminders1` gone, the assistant's `remind` sending `when`.
+
 - `crates/isle-core/src/when.rs`: `when(line) -> {title, due_ms}` on top of
   `calendar::parse`'s time of day, plus the day words above. Unit tests for
   each form, the past-means-tomorrow rule, and a line with no time.
