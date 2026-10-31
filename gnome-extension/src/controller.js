@@ -167,6 +167,8 @@ export class Controller {
         this._presentation = 'compact';
         /** Whether `_warmUp` shows the open island's view out of sight. */
         this._warmShown = false;
+        /** A warm-up the island opened in the middle of, and whether it was of all (see `_warmUp`); else null. */
+        this._warmHeld = null;
         this._expandWanted = false;
         this._alert = null;
         this._queue = [];
@@ -467,6 +469,8 @@ export class Controller {
             if (this._presentation === 'compact')
                 this._later('warm', WARM_AFTER_CLOSE_MS, () => this._warmUp(true));
         });
+        // Before the field under it sees the press: see `_onFieldPress`.
+        island.connect('captured-event', (_actor, event) => this._onFieldPress(event));
         island.connect('button-release-event', (_actor, event) => this._onClick(event));
         island.connect('touch-event', (_actor, event) => this._onTap(event));
         island.connect('scroll-event', (_actor, event) => this._onAlertScroll(event));
@@ -528,7 +532,8 @@ export class Controller {
         for (const key of ['hidden-pages', 'world-clocks', 'app-usage'])
             this._settingsChanged.push(this._settings.connect(`changed::${key}`, () => this._syncPages()));
         this._settingsChanged.push(this._settings.connect('changed::app-usage-clear', () => this._syncAppUsage()));
-        this._settingsChanged.push(this._settings.connect('changed::island-theme', () => this._syncTheme()));
+        for (const key of ['island-theme', 'glass-tint'])
+            this._settingsChanged.push(this._settings.connect(`changed::${key}`, () => this._syncTheme()));
         for (const provider of AGENT_PROVIDERS) {
             this._settingsChanged.push(this._settings.connect(`changed::agent-alerts-${provider}`, () =>
                 this._hookAgent(provider)));
@@ -720,10 +725,10 @@ export class Controller {
         // bar; on any other it hangs from the top of the screen like a notch.
         this._island.topInset = this._blendsIn ? this._topBar.height : 0;
         this._island.monitor = this._monitor;
-        // Without a top bar (another display, or a taskbar that took Main.panel) the open island's header
-        // is its own, and GNOME's clock stays where it is.
-        this._expanded.topInset = this._inTopBar ? this._topBar.height : px(HEADER_WITHOUT_BAR);
-        this._topBar.clockShown = !this._inTopBar;
+        // Without a top bar (another display) the open island's header is its own. In the bar, it keeps to the
+        // closed island's band, above the space below it.
+        this._expanded.topInset = this._inTopBar ? this._topBar.height - this._topBar.gap : px(HEADER_WITHOUT_BAR);
+        this._topBar.clockShown = !this._onBar;
         this._render();
         if (this._monitor !== before)
             this._syncFullscreen();
@@ -822,17 +827,23 @@ export class Controller {
         this._expanded.pageNamed('calendar').worldClocks = this._settings.get_boolean('world-clocks');
     }
 
-    /** The island in Isle's black or in dark glass, with GNOME's accent (see theme.js). */
+    /** The island in Isle's black or in glass, the glass with GNOME's accent (see theme.js). */
     _syncTheme() {
-        Theme.setTheme(this._settings.get_string('island-theme'));
-        const glass = Theme.theme() === 'glass';
-        for (const [name, on] of [['isle-theme-glass', glass], ['isle-accent-system', glass && HAS_ACCENT]]) {
+        Theme.setTheme(this._settings.get_string('island-theme'), this._settings.get_int('glass-tint'));
+        const see = Theme.translucent();
+        // The controls follow the tint in three steps (CSS can't blend): clear, middle, and dark like GNOME's menus.
+        const tint = see ? this._settings.get_int('glass-tint') : 0;
+        for (const [name, on] of [['isle-translucent', see], ['isle-accent-system', see && HAS_ACCENT],
+            ['isle-glass-mid', see && tint >= 34 && tint < 67], ['isle-glass-dark', see && tint >= 67]]) {
             if (on)
                 this._island.add_style_class_name(name);
             else
                 this._island.remove_style_class_name(name);
         }
         this._island.refreshTheme();
+        // An agent's alert on show takes the new theme's glow (see alerts.js); none while still building.
+        if (this._expanded)
+            this._syncTint();
     }
 
     /** Times the app in front while the Apps page's switch is on; clears when asked. */
@@ -1053,14 +1064,19 @@ export class Controller {
         this._presentation = presentation;
         if (presentation !== 'compact')
             this._putAwayWarm();
+        else if (this._warmHeld !== null && !this._timeouts.has('warm'))
+            this._later('warm', WARM_AFTER_CLOSE_MS, () => this._warmUp(this._warmHeld));
         // A display without the top bar: the island hangs from its top edge. Sizes are in stage pixels; the
         // CSS ones (padding) are divided by `scale` again, as St multiplies them.
         const scale = uiScale();
-        const top = this._inTopBar ? this._topBar.height : 0;
+        const top = this._onBar ? this._topBar.height : 0;
         // The closed island keeps the size it has in the bar on a display without one: moving the island
         // there must not shrink it (see the compact case below). A panel another extension moved to the
         // bottom has no bar height to take that size from, so it hangs at the notch's.
         const inBar = this._settings.get_boolean('island-in-top-bar') && this._topBar.height > 0;
+        // Inside the bar it leaves the bar's last few pixels free (Settings), open as well as closed. Its size
+        // comes from the bar, not from `top`: off the bar the island keeps it and hangs from the screen.
+        const band = this._topBar.height - (inBar ? this._topBar.gap : 0);
         // Before measuring it: inside the bar it is smaller.
         this._compact.inBar = inBar;
 
@@ -1071,7 +1087,7 @@ export class Controller {
         case 'expanded':
             size = {
                 width: this._expanded.preferredWidth,
-                height: (this._inTopBar ? top : HEADER_WITHOUT_BAR * scale) + (PAGE_HEIGHT + BOTTOM_PADDING) * scale,
+                height: (this._inTopBar ? band : HEADER_WITHOUT_BAR * scale) + (PAGE_HEIGHT + BOTTOM_PADDING) * scale,
                 radius: EXPANDED_RADIUS * scale,
                 shoulder: EXPANDED_SHOULDER * scale,
             };
@@ -1106,7 +1122,7 @@ export class Controller {
         default:
             size = {
                 width: this._compact.preferredWidth,
-                height: inBar ? this._topBar.height : top + this._settings.get_int('notch-depth') * scale,
+                height: inBar ? band : top + this._settings.get_int('notch-depth') * scale,
                 radius: (inBar ? IN_BAR_RADIUS : COMPACT_RADIUS) * scale,
                 shoulder: (inBar ? IN_BAR_SHOULDER : COMPACT_SHOULDER) * scale,
             };
@@ -1138,6 +1154,7 @@ export class Controller {
     _warmUp(all) {
         const island = this._island;
         const expanded = this._expanded;
+        this._warmHeld = null;
         if (!island.mapped)
             return;
         const pages = expanded.pages.filter(page => page.cold && !page.hidden);
@@ -1168,9 +1185,9 @@ export class Controller {
             steps.push(() => this._putAwayWarm());
         }
         const next = () => {
-            // Opened meanwhile (see `_render`): the rest waits.
+            // Opened meanwhile: it starts again once the island is closed (see `_render`), not polled meanwhile.
             if (this._presentation !== 'compact') {
-                this._later('warm', WARM_START_MS, () => this._warmUp(all));
+                this._warmHeld = all;
                 return;
             }
             steps.shift()?.();
@@ -1457,6 +1474,27 @@ export class Controller {
         return Clutter.EVENT_STOP;
     }
 
+    /** A press on a text field takes the keyboard first, then puts the field back in focus: the grab moves focus
+     * to the island. Pages can't ask from the field's own press, which GNOME 50 gives its gestures instead. */
+    _onFieldPress(event) {
+        const type = event.type();
+        if (!(type === Clutter.EventType.TOUCH_BEGIN ||
+            (type === Clutter.EventType.BUTTON_PRESS && event.get_button() === Clutter.BUTTON_PRIMARY)))
+            return Clutter.EVENT_PROPAGATE;
+        // The field or its text, not its icons (the calendar's chip, the assistant's Send).
+        const actor = global.stage.get_actor_at_pos(Clutter.PickMode.REACTIVE, ...event.get_coords());
+        const entry = actor instanceof St.Entry ? actor : actor?.get_parent();
+        if (!(entry instanceof St.Entry) || (actor !== entry && actor !== entry.clutter_text) ||
+            !entry.clutter_text.reactive || !this._island.contains(entry))
+            return Clutter.EVENT_PROPAGATE;
+        if (!this._keyboardGrab)
+            this._setKeyboard(true);
+        // Also from one field to another while typing: a Timer length, not editable until focused, takes no press.
+        if (this._keyboardGrab && !entry.clutter_text.has_key_focus())
+            entry.clutter_text.grab_key_focus();
+        return Clutter.EVENT_PROPAGATE;
+    }
+
     /** A tap is a primary click, but for a button's own; opened by one, a tap elsewhere closes it. */
     _onTap(event) {
         if (event.type() !== Clutter.EventType.TOUCH_END)
@@ -1479,6 +1517,10 @@ export class Controller {
         // by the keyboard grab, which closes it.
         if (this._paletteOpen)
             return Clutter.EVENT_PROPAGATE;
+        // Released off the island: the press outside that ended typing (see `_setKeyboard`) comes back here.
+        if (!this._shelfHelper.containsPointer() &&
+            !this._island.contains(global.stage.get_actor_at_pos(Clutter.PickMode.REACTIVE, ...event.get_coords())))
+            return Clutter.EVENT_STOP;
         // A click puts an answer away; the face and the Sign in button take their own clicks.
         if (this._voiceOpen) {
             // Peeked at by hovering while it works, a click keeps it open, Esc putting it back.
@@ -1617,13 +1659,16 @@ export class Controller {
                 return;
             }
             this._keyboardGrab = grab;
-            // Clicking anywhere else ends typing and closes the island.
-            this._stageCapture = global.stage.connect('captured-event', (_stage, event) => {
+            // Clicking anywhere else ends typing and closes the island. Watched on the island: under its grab
+            // GNOME 46 hands it the presses outside too, and never shows them to the stage.
+            this._stageCapture = this._island.connect('captured-event', (_island, event) => {
                 // The shelf helper's window lies over the island: inside too.
                 const press = [Clutter.EventType.BUTTON_PRESS, Clutter.EventType.TOUCH_BEGIN].includes(event.type());
                 if (press && !this._shelfHelper.containsPointer() &&
                     !this._island.contains(global.stage.get_actor_at_pos(Clutter.PickMode.REACTIVE, ...event.get_coords()))) {
                     this.collapse();
+                    // Nothing in the island takes it; its release is let go in `_onClick`.
+                    return Clutter.EVENT_STOP;
                 }
                 return Clutter.EVENT_PROPAGATE;
             });
@@ -1632,7 +1677,7 @@ export class Controller {
             // make a text field ask to release it again.
             const grab = this._keyboardGrab;
             this._keyboardGrab = null;
-            global.stage.disconnect(this._stageCapture);
+            this._island.disconnect(this._stageCapture);
             Main.popModal(grab);
             // Left during the grab, the pointer told the island nothing: an alert would wait for it forever.
             // Read now, so the alert shown next is timed by where the pointer really is.
