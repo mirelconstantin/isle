@@ -63,8 +63,12 @@ Done when: `cargo test -p isle-core` covers the parser, a migrated
 
 ### 1 — Setting it on the page
 
+**Done**: the new row reads the line 150 ms after typing stops (and again on Enter, in case it was faster),
+shows the time it found as a chip; rows show their time at the right and clicking it edits it through the
+same parser; the list is ordered late → soonest → untimed; a new row is scrolled to.
+
 - The New reminder row parses as you type (`Todo1.Parse`, debounced) and shows
-  the chip (`Tomorrow · 17:00`, or `No time`); Enter adds with it.
+  the chip (`Tomorrow 17:00`; nothing for a line with no time); Enter adds with it.
 - Rows show their time at the right; clicking it re-opens the chip to change it
   (`SetDue`).
 - Order: late first, then soonest, then untimed in the order added — one

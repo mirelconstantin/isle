@@ -730,6 +730,18 @@
 .isle-reminder-remove, .isle-reminder-focus { padding: 3px; border-radius: 99px; color: rgba(255, 255, 255, 0.5); }
 .isle-reminder-remove:hover, .isle-reminder-focus:hover { color: #ffffff; background-color: rgba(255, 255, 255, 0.1); }
 
+/* The time at the right of a row, by its first line: quiet, and the page's orange once it is late. */
+.isle-reminder-when {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  margin: 4px 0 0 8px;
+  font-feature-settings: "tnum";
+}
+.isle-reminder-when.late { color: #ff9f0a; }
+/* The line being typed, as quiet as the hint it stands in for. */
+.isle-reminder-new-when { color: rgba(255, 255, 255, 0.55); }
+.isle-reminder-when-field { font-size: 11px; }
+
 .isle-reminders-empty { font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, 0.55); padding-top: 22px; }
 
 /* Plain text fields, inside the row (Blur my Shell restyles entries with !important). */
