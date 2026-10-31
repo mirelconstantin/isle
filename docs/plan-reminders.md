@@ -80,6 +80,12 @@ restart.
 
 ### 2 — The warning and the hour
 
+**Done**: `reminder-alert-minutes` (0–60, 10 by default) with its row in Settings → Alerts; the watcher plans
+a heads-up and the hour for each reminder (a changed time re-plans both, and a snooze — ten minutes out with
+a ten-minute lead — goes straight to its hour); the heads-up is quiet and unbuttoned, the hour is sticky with
+its chime, **Done** and **Snooze 10 min**. The repeating chime was left out: it is the one part that can only
+annoy, and the alert already waits for you.
+
 - Setting `reminder-alert-minutes` (0–60, 10 by default) and its row in
   Settings → Alerts, beside the event one.
 - `reminders.js`: two fires per row (due − lead, due), the calendar's shape.

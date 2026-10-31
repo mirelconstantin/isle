@@ -129,6 +129,12 @@
       <default>5</default>
       <summary>Minutes before an event its alert shows</summary>
     </key>
+    <key name="reminder-alert-minutes" type="i">
+      <range min="0" max="60"/>
+      <default>10</default>
+      <summary>Minutes before a reminder its quiet heads-up shows</summary>
+      <description>0 shows it only when it is due. The reminder itself still alerts at its time.</description>
+    </key>
     <key name="event-calendar" type="s">
       <default>''</default>
       <summary>Where new events go</summary>

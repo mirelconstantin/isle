@@ -74,6 +74,8 @@ const STILL_OUTSIDE_MS = 30000;
 const COLLAPSE_DELAY_MS = 300;
 /** An alert the pointer rested on stays this long once it leaves, to finish reading. */
 const ALERT_LEAVE_MS = 1500;
+/** How long a reminder's Snooze puts it off. */
+const SNOOZE_MS = 10 * 60 * 1000;
 /** Touchpad travel over an alert that puts it away (up) or opens the island (down); a wheel's click is one. */
 const ALERT_SWIPE = 1.5;
 /** A pause this long between scroll events starts a new swipe. */
@@ -351,10 +353,25 @@ export class Controller {
         this._osd = new OsdHook((icon, label, level, maxLevel) => this._showOsd(icon, label, level, maxLevel));
         this._watchIdle();
         this._installedApps = new InstalledApps();
-        this._reminders = new ReminderWatcher(this._daemon, (reminder, done) => {
+        this._reminders = new ReminderWatcher(this._daemon, this._settings, (reminder, kind, done) => {
+            // The heads-up is quiet: no chime, no button, gone by itself.
+            if (kind === 'soon') {
+                this._post(Alerts.reminderSoon(reminder, this._settings.get_int('reminder-alert-minutes')));
+                return;
+            }
             this._post(Alerts.reminder(reminder, () => {
                 this._chime('complete');
                 done();
+            }, {
+                // Marked shown first: a snooze clears that mark again (see `SetDue`).
+                onSnooze: () => {
+                    done();
+                    this._daemon.call('todo', 'SetDue', reminder.id, Date.now() + SNOOZE_MS);
+                },
+                onDone: () => {
+                    done();
+                    this._daemon.call('todo', 'SetDone', reminder.id, true);
+                },
             }));
         });
         this._syncVoiceEnabled();

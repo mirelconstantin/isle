@@ -386,6 +386,8 @@ export default class IslePreferences extends ExtensionPreferences {
         const eventMinutes = spinRow(settings, 'event-alert-minutes', 'Minutes before an event', null, 1, 60);
         settings.bind('event-alerts', eventMinutes, 'sensitive', Gio.SettingsBindFlags.GET);
         alerts.add(eventMinutes);
+        alerts.add(spinRow(settings, 'reminder-alert-minutes', 'Minutes before a reminder',
+            'A quiet heads-up; 0 shows it only when it is due', 0, 60));
         alerts.add(switchRow(settings, 'track-peek', 'New song', 'Briefly show the song when the track changes'));
         alerts.add(switchRow(settings, 'lyrics-online', 'Lyrics', 'Look up the playing song’s lyrics on LRCLIB'));
         alerts.add(switchRow(settings, 'chimes', 'Sounds', 'Chime when a focus session or break ends, and for reminders'));
