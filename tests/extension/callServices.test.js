@@ -16,6 +16,39 @@ test('a title names its service', () => {
     assert.equal(serviceOf('Tulis Lab - Google Chrome'), null);
 });
 
+test('every call service, installed or in a browser, is named', () => {
+    const named = [
+        ['(3) WhatsApp', 'WhatsApp'],
+        ['Telegram', 'Telegram'],
+        ['Discord | #general', 'Discord'],
+        ['Zoom Meeting', 'Zoom'],
+        ['Weekly sync | Microsoft Teams meeting', 'Microsoft Teams'],
+        ['Jitsi Meet - Google Chrome', 'Jitsi Meet'],
+        ['#isle - Workspace - Slack', 'Slack'],
+        ['Messenger', 'Messenger'],
+        ['Signal', 'Signal'],
+        ['Skype', 'Skype'],
+        ['Webex Meeting', 'Webex'],
+        ['Google Chat - Google Chrome', 'Google Chat'],
+        ['Guilded - Chat', 'Guilded'],
+        ['Revolt', 'Revolt'],
+        ['Zulip - #dev', 'Zulip'],
+        ['Mattermost - Town square', 'Mattermost'],
+        ['Whereby', 'Whereby'],
+        ['GoTo Meeting', 'GoTo Meeting'],
+        ['BlueJeans', 'BlueJeans'],
+        ['Amazon Chime', 'Amazon Chime'],
+        ['Viber', 'Viber'],
+        ['WeChat', 'WeChat'],
+        ['Mumble', 'Mumble'],
+        ['TeamSpeak 3', 'TeamSpeak'],
+        ['DingTalk', 'DingTalk'],
+        ['Meet - kgm-mwyq-mge - Google Chrome', 'Google Meet'],
+    ];
+    for (const [title, service] of named)
+        assert.equal(serviceOf(title), service, title);
+});
+
 test('a meeting whose name holds "meet" is still its own service', () => {
     assert.equal(serviceOf('Meet with Ana - Zoom'), 'Zoom');
     assert.equal(serviceOf('Meet and greet - Zoom Meeting'), 'Zoom');

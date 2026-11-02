@@ -300,7 +300,9 @@ screen is shared or recorded the island is on screen for whoever watches it, so
 the preview gives way to "Hidden while sharing" — unless Settings → Calls →
 While sharing is on (it is by default), which keeps the call there with a
 small "Sharing" (or "Recording") pill over it. On the right: the app's icon and
-the service or app name ("Google Meet", "Zoom", "WhatsApp"), "Voice call" or
+the call's name — the service its window names ("Google Meet", "Zoom", "Discord",
+"Microsoft Teams", "Slack", "WhatsApp", "Telegram", "Signal", "Webex", "Jitsi",
+"Google Chat"…), or the app's own name when the window names none — "Voice call" or
 "Video call" (while the camera is on) with the length in green, and two round
 buttons with captions: **Mute** (the call's own microphone stream, so that app
 alone, and the default input when there is no stream; white and "Muted" while

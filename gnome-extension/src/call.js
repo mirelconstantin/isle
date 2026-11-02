@@ -238,6 +238,8 @@ export class CallMonitor extends Signals.EventEmitter {
         this.since = this._heldSince;
         global.display.list_all_windows().forEach(window => this._watchWindow(window));
         this._identify(stream);
+        // Once, what the call was taken for: "it names the wrong app" is answered from the journal.
+        console.log(`Isle: call in ${this.app?.get_name() ?? 'an app not known'}${this._service ? `, a ${this._service} one` : ''}`);
         this.emit('started');
         this.emit('changed');
     }
@@ -362,13 +364,14 @@ export class CallMonitor extends Signals.EventEmitter {
         // Most recently used first.
         const appWindows = app ? app.get_windows().filter(usable) : [];
         // A browser's web app (Meet, WhatsApp Web) may run in a window the shell files under another app,
-        // but always of the same browser: a Meet tab in Firefox is not a call in Chrome.
+        // but always of the same browser: a Meet tab in Firefox is not a call in Chrome. An app that is not a
+        // browser keeps to its own windows: a Meet tab open in Chrome is not the window of a Discord call.
         const family = app ? appWindows.map(window => (window.get_wm_class() ?? '').match(BROWSERS)?.[0]).find(Boolean) : null;
-        const browserWindows = !app || family
+        const browserWindows = family
             ? global.display.list_all_windows().filter(window => usable(window) &&
-                (family ? (window.get_wm_class() ?? '').toLowerCase().includes(family.toLowerCase())
-                    : BROWSERS.test(window.get_wm_class() ?? '')))
-            : [];
+                (window.get_wm_class() ?? '').toLowerCase().includes(family.toLowerCase()))
+            : app ? [] : global.display.list_all_windows().filter(window => usable(window) &&
+                BROWSERS.test(window.get_wm_class() ?? ''));
         const candidates = [...new Set([...appWindows, ...browserWindows])];
         const current = candidates.includes(this.window) ? this.window : null;
         // Kept while it still shows the call; else a window whose title came to show it as the call left this one

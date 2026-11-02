@@ -44,7 +44,11 @@ All notable changes to Isle are listed here. The format follows
 ### Fixed
 
 - A call is named after its own service again: "Meet with Ana - Zoom" is a Zoom call, not a Google Meet one
-  (the services are tried from the most specific, and "meet" only when nothing else is named).
+  (the services are tried from the most specific, and "meet" only when nothing else is named). The list now
+  covers the services people call on — WhatsApp, Telegram, Discord, Zoom, Teams, Jitsi, Slack, Messenger,
+  Signal, Skype, Webex, Google Chat, Guilded, Revolt, Zulip, Mattermost, Whereby, GoTo Meeting, BlueJeans,
+  Amazon Chime, Viber, WeChat, Mumble, TeamSpeak and DingTalk — installed or in a browser, and a call in any
+  other app is named after the app itself. The journal says what a call was taken for as it starts.
 - The call page's **Mute** acts on the call's own microphone stream, so it works when the call opened an input
   that is not the default one, and does not silence other apps; **Open** brings the call's window out of the
   taskbar too, instead of leaving a minimised window behind.
