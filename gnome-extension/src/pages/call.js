@@ -80,7 +80,10 @@ class WindowPreview extends St.Widget {
             y_align: Clutter.ActorAlign.CENTER,
             opacity: 0,
         });
-        for (const child of [this._view, this._placeholder, this._corners, this._hover])
+        // Says why the call is still there while the screen is shared.
+        this._badge = label('', 'isle-call-badge', {x_align: Clutter.ActorAlign.START, y_align: Clutter.ActorAlign.START});
+        this._badge.visible = false;
+        for (const child of [this._view, this._placeholder, this._corners, this._hover, this._badge])
             this.add_child(child);
         this.connect('destroy', () => this._detach());
         onUiScale(this, scale => {
@@ -97,8 +100,8 @@ class WindowPreview extends St.Widget {
         roundCorners(this, Theme.translucent() ? PREVIEW_RADIUS * uiScale() : null);
     }
 
-    /** Shows `window` live, or else `gicon` with an optional `hint`. */
-    update({window = null, gicon = null, hint = null}) {
+    /** Shows `window` live, or else `gicon` with an optional `hint`, and a `badge` over it. */
+    update({window = null, gicon = null, hint = null, badge = null}) {
         if (window !== this._window) {
             this._detach();
             if (window)
@@ -110,6 +113,8 @@ class WindowPreview extends St.Widget {
         this._appIcon.gicon = gicon;
         this._hint.text = hint ?? '';
         this._hint.visible = Boolean(hint);
+        this._badge.text = badge ?? '';
+        this._badge.visible = Boolean(badge);
         if (!live)
             this._setWidth(PLACEHOLDER_WIDTH);
     }
@@ -327,9 +332,13 @@ class CallPage extends Page {
         const {window} = this._call;
         if (!this.active || !window || !this._settings.get_boolean('call-preview'))
             return {};
-        // Whoever watches the shared or recorded screen should not see the call.
-        if (this._privacy.screenShare || this._privacy.recording)
-            return {hint: 'Hidden while sharing'};
+        if (this._privacy.screenShare || this._privacy.recording) {
+            // The island is on screen for whoever watches the shared or recorded screen: the call is hidden
+            // there unless asked for (Settings → Calls → While sharing), and says why when it stays.
+            if (!this._settings.get_boolean('call-preview-sharing'))
+                return {hint: 'Hidden while sharing'};
+            return {window, badge: this._privacy.recording ? 'Recording' : 'Sharing'};
+        }
         return {window};
     }
 

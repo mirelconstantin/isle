@@ -103,7 +103,7 @@ This fork ([mirelconstantin/isle](https://github.com/mirelconstantin/isle)) buil
 <tr>
 <td width="50%" valign="top">
 <img src="docs/images/call.png" alt="A Google Meet call in the island: its length, mute and open" width="100%"><br>
-<b>Calls</b> in WhatsApp, Telegram, Meet or any app or browser: the closed island shows a green phone beside the time, and the Call page how long the call has lasted. Open it to see the call live (you and whoever you call) while you work in other windows, mute your microphone, or jump back to the call.
+<b>Calls</b> in WhatsApp, Telegram, Meet or any app or browser: the closed island shows a green phone beside the time, and the Call page how long the call has lasted. Open it to see the call live (you and whoever you call) while you work in other windows — also while you share your screen, marked Sharing — mute the call's microphone, or jump back to it.
 </td>
 <td width="50%" valign="top">
 <img src="docs/images/focus.png" alt="Timer page: the timer's ring, the work and break lengths, and Start" width="100%"><br>

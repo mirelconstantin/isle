@@ -407,6 +407,10 @@ export default class IslePreferences extends ExtensionPreferences {
             'See yourself and whoever you call, live in the open island');
         settings.bind('call-activity', preview, 'sensitive', Gio.SettingsBindFlags.GET);
         calls.add(preview);
+        const sharing = switchRow(settings, 'call-preview-sharing', 'While sharing',
+            'Keep the call in the preview when your screen is shared or recorded: whoever watches it sees the call too');
+        settings.bind('call-preview', sharing, 'sensitive', Gio.SettingsBindFlags.GET);
+        calls.add(sharing);
         page.add(calls);
         return page;
     }
