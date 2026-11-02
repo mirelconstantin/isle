@@ -86,6 +86,10 @@ All notable changes to Isle are listed here. The format follows
 - With the island following the display in use, the closed island keeps the size it has in the bar on a
   display without a top bar, or where a taskbar took the panel: it no longer shrinks or vanishes when
   it moves there, and the open island's header no longer rides up into the screen's edge.
+- Moving a repeating reminder's time no longer stops it coming back: the sheet keeps its rule unless the
+  words name another ("every monday"), and the assistant's reschedule leaves it alone too.
+- The command surface ranks an action's own name above a word that only appears in its keywords.
+
 ## [1.6.0] - 2026-11-03
 
 Send files between the Shelf and your phone, auto-hide, alerts over full-screen apps, a black top bar beside

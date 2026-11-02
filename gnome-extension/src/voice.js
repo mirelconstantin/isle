@@ -1289,8 +1289,9 @@ const ACTIONS = {
         if (!due_ms)
             return failed('could not read that time');
         await called(daemon, 'todo', 'SetDue', id, due_ms);
-        if ((repeat ?? '') !== (task.repeat ?? ''))
-            await called(daemon, 'todo', 'SetRepeat', id, repeat ?? '');
+        // Only a repeat the words name is set: moving a weekly reminder's time leaves it weekly.
+        if (repeat)
+            await called(daemon, 'todo', 'SetRepeat', id, repeat);
         return due_ms;
     },
     volume: ({level, command}, {audio}) => {

@@ -33,23 +33,27 @@ function buildRows(data, query) {
         const index = text(title).indexOf(q);
         return index >= 0 ? index : 1000 + text(haystack).indexOf(q);
     };
-    const pick = (items, key, limit) => {
+    // `key` is everything a row answers to; `title` is what ranks a match first (an action's own name beats
+    // a word in its keywords).
+    const pick = (items, key, limit, title = key) => {
         if (!q)
             return items.slice(0, limit);
         return items
             .filter(item => text(key(item)).includes(q))
-            .sort((a, b) => rank(key(a), key(a)) - rank(key(b), key(b)))
+            .sort((a, b) => rank(key(a), title(a)) - rank(key(b), title(b)))
             .slice(0, limit);
     };
 
     add('Go to', pick(data.pages ?? [], page => page.title, MAX_PER_SECTION.pages)
         .map(page => ({kind: 'page', title: page.title, subtitle: 'Page', icon: page.icon, name: page.name})));
 
-    add('Do', pick(data.actions ?? [], action => `${action.title} ${action.keywords ?? ''}`, MAX_PER_SECTION.actions)
+    add('Do', pick(data.actions ?? [], action => `${action.title} ${action.keywords ?? ''}`, MAX_PER_SECTION.actions,
+        action => action.title)
         .map(action => ({kind: 'action', ...action})));
 
     // Records and apps wait for a word: with an empty field the surface is a launcher, not a dump.
-    add('Clipboard', q ? pick(data.clips ?? [], clip => `${clip.title} ${clip.subtitle ?? ''}`, MAX_PER_SECTION.clips)
+    add('Clipboard', q ? pick(data.clips ?? [], clip => `${clip.title} ${clip.subtitle ?? ''}`, MAX_PER_SECTION.clips,
+        clip => clip.title)
         .map(clip => ({kind: 'clip', ...clip})) : []);
 
     add('Reminders', q ? pick(data.tasks ?? [], task => task.title, MAX_PER_SECTION.tasks)

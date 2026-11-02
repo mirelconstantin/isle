@@ -198,18 +198,26 @@ class WhenSheet extends St.BoxLayout {
         const weekly = choices[choices.length - 1].value;
         if (this._repeat && this._repeat !== 'day' && this._repeat !== 'weekday' && this._repeat !== weekly)
             this._repeat = weekly;
-        // Rebuilt with the day: the weekly chip names that day.
-        this._repeatRow.destroy_all_children();
-        for (const choice of choices) {
-            const button = pillButton(choice.label, 'isle-pill-small isle-when-repeat', () => {
-                this._repeat = choice.value;
-                this._sync();
-            });
-            button.can_focus = false;
-            if (choice.value === this._repeat)
-                button.add_style_class_name('selected');
-            this._repeatRow.add_child(button);
+        // Built once for a weekday, then only the picked one moves: a day change rebuilds them, a step of the
+        // time does not (each key press would otherwise make and drop four widgets).
+        if (this._chipsDay !== weekly) {
+            this._chipsDay = weekly;
+            this._repeatRow.destroy_all_children();
+            for (const choice of choices) {
+                const button = pillButton(choice.label, 'isle-pill-small isle-when-repeat', () => {
+                    this._repeat = choice.value;
+                    this._sync();
+                });
+                button.can_focus = false;
+                this._repeatRow.add_child(button);
+            }
         }
+        this._repeatRow.get_children().forEach((button, index) => {
+            if (choices[index].value === this._repeat)
+                button.add_style_class_name('selected');
+            else
+                button.remove_style_class_name('selected');
+        });
     }
 
     _toggleTyped() {

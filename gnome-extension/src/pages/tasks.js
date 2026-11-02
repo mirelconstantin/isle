@@ -564,7 +564,10 @@ export const TasksPage = GObject.registerClass({
                 return;
             }
             due_ms = parsed.due_ms;
-            repeat = parsed.repeat ?? '';
+            // The words name a repeat only when they say one ("every monday"); otherwise the reminder keeps
+            // the rule it has, so moving a weekly one's time does not quietly stop it coming back.
+            if (parsed.repeat)
+                repeat = parsed.repeat;
         }
         if (task) {
             this._closeWhen();

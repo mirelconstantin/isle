@@ -347,6 +347,71 @@ mod tests {
         assert_eq!(list.items().len(), 2);
     }
 
+    /// A local wall-clock time as epoch milliseconds, the way a due time is kept.
+    fn at(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> i64 {
+        epoch_ms(
+            chrono::NaiveDate::from_ymd_opt(year, month, day)
+                .unwrap()
+                .and_hms_opt(hour, minute, 0)
+                .unwrap(),
+        )
+    }
+
+    #[test]
+    fn a_repeat_only_takes_a_rule_isle_knows() {
+        assert_eq!(repeat_from("").unwrap(), None);
+        assert_eq!(repeat_from("mon").unwrap(), Some("mon"));
+        assert_eq!(repeat_from("weekday").unwrap(), Some("weekday"));
+        assert!(repeat_from("fortnightly").is_err());
+    }
+
+    #[test]
+    fn ticking_a_repeating_reminder_moves_it_on() {
+        // Monday 2 November 2026, 09:00, weekly; ticked that afternoon.
+        let due = at(2026, 11, 2, 9, 0);
+        let now = at(2026, 11, 2, 15, 0);
+        let mut list = TodoList::default();
+        let id = list.add("Gym", Some(due)).unwrap();
+        assert!(list.set_repeat(id, Some("mon")));
+        assert!(roll_forward(&mut list, id, now));
+        // The next Monday, at the same hour, and its alert can show again.
+        assert_eq!(list.items()[0].due_ms, Some(at(2026, 11, 9, 9, 0)));
+        assert!(!list.items()[0].alerted);
+    }
+
+    #[test]
+    fn a_stale_daily_reminder_moves_to_the_next_one_ahead() {
+        // Three days late: the next one is tomorrow, not the day after the one it missed.
+        let due = at(2026, 11, 2, 9, 0);
+        let now = at(2026, 11, 5, 12, 0);
+        let mut list = TodoList::default();
+        let id = list.add("Vitamins", Some(due)).unwrap();
+        assert!(list.set_repeat(id, Some("day")));
+        assert!(roll_forward(&mut list, id, now));
+        assert_eq!(list.items()[0].due_ms, Some(at(2026, 11, 6, 9, 0)));
+    }
+
+    #[test]
+    fn a_weekday_repeat_skips_the_weekend() {
+        // Friday 6 November 2026, ticked; the next weekday is Monday the 9th.
+        let due = at(2026, 11, 6, 9, 0);
+        let mut list = TodoList::default();
+        let id = list.add("Standup", Some(due)).unwrap();
+        assert!(list.set_repeat(id, Some("weekday")));
+        assert!(roll_forward(&mut list, id, due));
+        assert_eq!(list.items()[0].due_ms, Some(at(2026, 11, 9, 9, 0)));
+    }
+
+    #[test]
+    fn a_task_that_does_not_repeat_stays_where_it_is() {
+        let due = at(2026, 11, 2, 9, 0);
+        let mut list = TodoList::default();
+        let id = list.add("Call the bank", Some(due)).unwrap();
+        assert!(!roll_forward(&mut list, id, at(2026, 11, 3, 9, 0)));
+        assert_eq!(list.items()[0].due_ms, Some(due));
+        assert!(!roll_forward(&mut list, id + 1, due));
+    }
+
     #[test]
     fn no_old_file_changes_nothing() {
         let mut list = TodoList::default();
