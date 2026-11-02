@@ -6,7 +6,9 @@ moves quickly — 1.5.1 rewrote the closed island, the island's drawing and the
 MPRIS client — so this file exists to make the next merge boring: what we add,
 which upstream code it leans on, and what to do when that code moves.
 
-Written against **upstream v1.5.1** (`5845d74`), merged in `531a14b`.
+Merged up to **upstream v1.5.3** (`5f2ac15`, in `b9fc525`); our own work sits
+on top of it. `docs/plan-reminders.md` records why timed reminders are built the
+way they are.
 
 ## Rules
 
@@ -24,6 +26,17 @@ Written against **upstream v1.5.1** (`5845d74`), merged in `531a14b`.
    [CHANGELOG.md](../CHANGELOG.md) under `[Unreleased]`, its settings rows, its
    `docs/dbus-api.md` entry and its paragraph in
    [product-spec.md](product-spec.md).
+5. **The repo is not what runs.** Nothing here reaches the desktop until
+   `./install.sh` and a log out and back in (Wayland loads an extension only at
+   login). Before debugging "a bug in the new build", check the installed copy:
+   `diff -r --exclude=gschemas.compiled gnome-extension
+   ~/.local/share/gnome-shell/extensions/isle@zickrian.github.io` and
+   `isled --version`. The journal is the shell's only voice:
+   `journalctl -b -o cat | grep "Isle:"`.
+
+Our own commits sit on top of that merge: `git log --oneline upstream/main..HEAD`
+lists them, `git diff upstream/main..HEAD --stat` sizes them, and the map below
+says what each part owns.
 
 ## The map
 
@@ -31,13 +44,13 @@ Written against **upstream v1.5.1** (`5845d74`), merged in `531a14b`.
 |---|---|---|---|
 | Command surface, Super+K | `commandPalette.js`, `controller.js` (`_palette*`, `_onCommandKey`, `_syncCommandShortcut`, `_paletteData`), `expanded.js` (`PAGE_TABS`), `stylesheet.css` | `Island.addView`, the `_render` presentation switch, `Main.pushModal` keyboard grabs, `ExpandedView.pages`, `CalendarPage.todayEvents` | The `palette` case in `_render` still has `VOICE_RADIUS`/`PEEK_SHOULDER`/`PEEK_TOP_GLASS`; `_onClick` and `_onHoverChanged` still return early while `_paletteOpen`; `collapse()` still closes it first |
 | Clipboard stack, Super+Alt+V | `pages/clips.js`, `pages/shelf.js` (`_setStackMode`, `_syncStackBar`, `pasteNext`, `enterStack`), `clipboardQuery.js`, `controller.js` (`_syncStackShortcut`, `_onStackKey`, `_syncClipboard`) | `Clipboard1`, `ShelfPage`'s controls row, `Main.wm.addKeybinding` | The shelf's fields it toggles (`_clear`, `_confirm`, `_search`, `_searchButton`, `_searchSpacer`, `_clipboardControls`) still exist; `clipboardQuery.js` still matches `isled`'s search |
-| Timed reminders | `reminderRules.js`, `pages/tasks.js`, `reminders.js`, `alerts.js` (`reminder`, `reminderSoon`), `compact.js` (the countdown), `isle-core/src/when.rs`, `isle-daemon/src/todo.rs`, `assistant/agenda.rs` | `Todo1` (ours: `Parse`, `SetDue`, `SetAlerted`, `Add(text, due_ms)`), `CompactView._refresh`'s right slot and `_fit`, `PeekView`'s `actions` | `Reminders1` stays gone; the agenda lists timed to-dos as reminders; the countdown must keep taking the right slot only when it is free |
+| Timed reminders | `reminderRules.js`, `pages/tasks.js`, `reminders.js`, `alerts.js` (`reminder`, `reminderSoon`), `compact.js` (`_nextReminder`, `_syncReminder`, `_tickReminder`, `_reminderBell`/`_reminderPrimaryTime`), `isle-core/src/when.rs`, `isle-daemon/src/todo.rs`, `assistant/agenda.rs` | `Todo1` (ours: `Parse`, `SetDue`, `SetAlerted`, `Add(text, due_ms)`), `CompactView._refresh`'s left/right slots and `_fit`, `PeekView`'s `actions`, `Format.duration`/`timeOfDay` | `Reminders1` stays gone; the agenda lists timed to-dos as reminders; alone, a reminder is drawn as the timer is — bell left, countdown right (`_reminderPrimaryTime`), `mm:ss` each second, orange in the last minute; beside an activity it takes the right slot only when that is free |
 | Devices page | `pages/devices.js`, `expanded.js` (`TABS.devices`), `controller.js` (`_pageMakers`), `prefs.js` (`PAGES`), `stylesheet.css` | `_pageMakers()` order, `TABS`, `System1.State` (`bluetooth` list) | The page is still added after Usage, and `hidden-pages` still reaches it |
 | Timer figures, next meeting, reminder ▶ | `pages/timer.js` (`_buildTask`, `_buildStats`, `_buildNextMeeting`, `_syncStats`, `_syncNextMeeting`, `get tint`), `pages/tasks.js` (`focus-task`), `controller.js` (`_focusTask`, `_setMeeting`, `_onNextEvent`) | `TimerPage`'s steppers column and Start slot, `pomodoro` `State.history`, `CalendarPage`'s `next-event` | The rows are still children of the steppers column; `_syncLock` still locks only the Work/Break rows; `pageNamed('focus')` still matches `this.name` |
 | Timed Do Not Disturb | `notifications.js` (`dndUntil`, `setDndFor`, `setDndUntilTomorrow`, `_clearTimedDnd`, `_resumeTimedDnd`), `pages/notifications.js` (the chevron), `focusMode.js` (`_timedDndActive`) | `NotificationCenter.dnd`, upstream's `focus-dnd-owned`, `show-banners` | A focus session and a timed DND still do not turn each other off; `dnd-until` survives a restart |
 | Header Join pill | `expanded.js` (`setMeeting`, `_syncMeeting`, `meeting-requested`), `pages/calendar.js` (`next-event`, `refreshNextEvent`, `todayEvents`), `stylesheet.css` | `ExpandedView`'s header row and its width bookkeeping, `CalendarPage._scheduleAlarm` | The pill hides itself past the meeting's end; the header's width is still reserved so the clock does not move |
 | Island sheen | `island.js`, four lines in `SHAPE_CODE` | The `ShapeFill` shader (`fill`, `tint`, `edge`, `edgeAlpha`) | It is still in the shader. Never bring back a Cairo `_draw`: 1.5.1 removed that path for a reason |
-| Off-the-bar sizing and clock | `controller.js` (`_inTopBar`, `inBar`/`band` in `_render`, `_updateGeometry`, `_onPanelStyle`), `shell.js` (`height`, `blendsIn`, `clockShown`, `_clearBar`, `destroy`) | `TopBar.isTopPanel`, `TopBar.gap`, `Main.panel`'s style | See *Invariants* |
+| Off-the-bar sizing and clock | `controller.js` (`_inTopBar`, `_barHeight`, `inBar`/`band` in `_render`, `_updateGeometry`, `_onPanelStyle`), `shell.js` (`height`, `blendsIn`, `clockShown`, `_gap`, `_clearBar`, `destroy`) | `TopBar.isTopPanel`, `TopBar.gap`, `Main.panel`'s style | See *Invariants*: `_gap` is a number from the first frame, and no size the island is given may exceed the display |
 | Fork metadata | `metadata.json` (`url`, `version-name`), `Cargo.toml` (`repository`), `README.md`, `.github/workflows/ci.yml` (`workflow_dispatch`) | — | Upstream bumps `version-name` and the AUR files; take its number, keep our `url` |
 
 ## Conflict playbook
@@ -55,14 +68,16 @@ our pieces back verbatim:
   our signature has `settings`;
 - the signal wiring in `_buildExpanded` (`next-event`, `meeting-requested`,
   `focus-task`);
-- `_inTopBar` and the `inBar`/`band` lines in `_render` (see *Invariants*).
+- `_inTopBar` and the `inBar`/`band` lines in `_render` (see *Invariants*);
+- `_expanded.topInset` and the expanded height: since 1.5.2 the open island fills
+  the bar (`_barHeight`), and only the closed one is shorter by the gap.
 
 The others, in order of how often they bite:
 
 | File | What is ours | How to resolve |
 |---|---|---|
 | `expanded.js` | `devices` in `TABS`, `PAGE_TABS` export, the meeting pill and `setMeeting` | Keep both; add our tab last and our pill to the status row |
-| `shell.js` | guards in `height`, `blendsIn`, `clockShown`, `_onPanelStyle`; `_clearBar`/`_restoreClock` in `destroy` | Keep upstream's new work, keep the guards, and add any new bar class to `_clearBar` (1.5.1 added `GAP_CLASS`) |
+| `shell.js` | guards in `height`, `blendsIn`, `clockShown`, `_onPanelStyle`; `_gap` set before the panel is asked about and starting at 0; `_clearBar`/`_restoreClock` in `destroy` | Keep upstream's new work and the guards. Add any new bar class to `_clearBar`, and drop the ones upstream removed (1.5.2 removed `GAP_CLASS`). `destroy` keeps our `_clearBar`/`_restoreClock` and upstream's own restores (1.5.2 added the drag gesture's button) |
 | `pages/timer.js` | `WEEK_DAYS`, `focusTime`, `dayKey`, the task/stats/next rows, `meeting-requested`, `get tint` | Take upstream's `_init`, steppers and locking, then add our three builders to the steppers column |
 | `notifications.js`, `pages/notifications.js`, `focusMode.js` | timed DND | Keep upstream's DND handling, keep `dndUntil` and the ownership dance |
 | `pages/shelf.js`, `pages/clips.js` | stack mode, retention, search filters | Keep both; the cards' click path is ours |
@@ -101,6 +116,18 @@ makes it include a mouse or keyboard on its own receiver.
 - **The open island's header** falls back to `HEADER_WITHOUT_BAR` where there is
   no top bar, again from `_inTopBar` — a negative inset rides up into the
   screen's edge.
+- **The bar's gap is a number.** `TopBar._gap` is read as `gap = _gap × scale`,
+  and the closed island's height is the bar's minus it. `_gap` used to be set
+  only after "is this panel a top bar yet?", so at login it was `undefined` and
+  the height `NaN` — which Clutter allocates as the whole screen (the island
+  filled the display). It now starts at 0, is computed before the panel is
+  asked about, and the getter never returns a non-finite value.
+- **No size past the display.** `_render` clamps any view's height to the
+  monitor and warns once (`Isle: … would be N px tall`): a wrong island is
+  better than a black wall, and the line names the cause.
+- **The D-Bus types match the Rust ones.** `due_ms` is `i64` in `isle-daemon`
+  and therefore `x` in `daemon.js`'s XML — `t` (u64) fails at runtime with
+  *Signature mismatch*, which no lint or test here would catch.
 - **The clock and the bar's colour** are Isle's only where Isle put them: a
   panel another extension moved is never restyled (`_onPanelStyle` returns
   early) and never hidden (`clockShown` forces `true`).
@@ -112,7 +139,7 @@ makes it include a mouse or keyboard on its own receiver.
 ## Taking an upstream release
 
 ```sh
-git fetch upstream --tags
+git fetch upstream --tags                      # first, always: 1.5.2 and 1.5.3 shipped the same day
 git log --oneline HEAD..upstream/main          # what is new
 git branch -f backup/pre-<version> main        # a way back
 git merge upstream/main --no-commit --no-ff    # resolve, then commit
@@ -184,7 +211,7 @@ once — nothing automated covers them:
 Finally, log it: a `[Unreleased]` entry in the changelog, and this file if a
 feature moved.
 
-## What 1.5.1 changed, as an example
+## What upstream changed, as an example
 
 | Upstream moved | We had to |
 |---|---|
@@ -194,3 +221,6 @@ feature moved.
 | The Focus page's label → Timer (`name` stays `focus`) | Rename it in the changelog, README and spec; keep `pageNamed('focus')` |
 | The closed island became content-sized with one sign each side | Nothing of ours lived in `compact.js`; the changelog's size numbers went away |
 | `Super+V` gained a setting (`super-v`) | Both settings rows sit in Clipboard now |
+| 1.5.2: the bar keeps its height; the closed island is shorter by the gap (`GAP_CLASS` gone) | `band` is still the closed island's; `_expanded.topInset` and the open island's height use the bar's full height; `_clearBar` lost `GAP_CLASS` |
+| 1.5.2: a clock choice (`clock-format`), `wallClock.js`, `Format.setClockFormat` | Nothing: our times already go through `Format.timeOfDay`/`duration`; the reminder countdown follows the setting for free |
+| 1.5.2: clipboard thumbnails (`thumb_width`/`thumb_height`, `clipRules.js`) | Keep our `SetRetention` row in `dbus-api.md` and upstream's `Items` shape |
