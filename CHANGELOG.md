@@ -8,6 +8,8 @@ All notable changes to Isle are listed here. The format follows
 
 ### Added
 
+- Calls keep their preview while you share or record your screen (Settings → Calls → While sharing, on by
+  default), with a small "Sharing" or "Recording" pill on it; off, the preview gives way to the hint as before.
 - Reminders can carry a time, and the line says it: "Call the bank tomorrow 17:00" is read as a title and a
   time (`today`, `tomorrow`, `tonight`, a weekday, `on 3 Nov`, `in 10 min`, or just `17:00`), and the new row
   shows what it read. The list is ordered late first, then the soonest, then the untimed; each row says its
@@ -41,6 +43,11 @@ All notable changes to Isle are listed here. The format follows
 
 ### Fixed
 
+- A call is named after its own service again: "Meet with Ana - Zoom" is a Zoom call, not a Google Meet one
+  (the services are tried from the most specific, and "meet" only when nothing else is named).
+- The call page's **Mute** acts on the call's own microphone stream, so it works when the call opened an input
+  that is not the default one, and does not silence other apps; **Open** brings the call's window out of the
+  taskbar too, instead of leaving a minimised window behind.
 - With the island following the display in use, the closed island keeps the size it has in the bar on a
   display without a top bar, or where a taskbar took the panel: it no longer shrinks or vanishes when
   it moves there, and the open island's header no longer rides up into the screen's edge.
