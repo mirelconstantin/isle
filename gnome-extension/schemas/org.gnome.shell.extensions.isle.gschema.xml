@@ -399,7 +399,11 @@
     </key>
     <key name="chimes" type="b">
       <default>true</default>
-      <summary>Play a sound when a focus session or break ends</summary>
+      <summary>Play a sound for reminders, timers, recordings, copies and errors</summary>
+      <description>Each occasion has its own sound, taken from the sound theme in use (see src/sounds.js): a
+      short one for a reminder's heads-up, a long alarm at its hour, a chime when a timer or focus session
+      ends, a warning when the screen starts recording and a low one when it stops, the lightest tick for a
+      copy, and an error sound when isled is down.</description>
     </key>
   </schema>
 </schemalist>

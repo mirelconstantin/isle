@@ -395,7 +395,8 @@ export default class IslePreferences extends ExtensionPreferences {
             'A quiet heads-up; 0 shows it only when it is due', 0, 60));
         alerts.add(switchRow(settings, 'track-peek', 'New song', 'Briefly show the song when the track changes'));
         alerts.add(switchRow(settings, 'lyrics-online', 'Lyrics', 'Look up the playing song’s lyrics on LRCLIB'));
-        alerts.add(switchRow(settings, 'chimes', 'Sounds', 'Chime when a focus session or break ends, and for reminders'));
+        alerts.add(switchRow(settings, 'chimes', 'Sounds',
+            'Reminders, timers, recordings, copies and errors, each with its own chime'));
         page.add(alerts);
 
         const calls = new Adw.PreferencesGroup({

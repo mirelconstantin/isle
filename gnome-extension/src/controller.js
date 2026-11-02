@@ -19,6 +19,7 @@ import * as Alerts from './alerts.js';
 import {AppUsage} from './appUsage.js';
 import {paletteFor} from './bot.js';
 import {ClipboardHistory} from './clipboard.js';
+import {SOUNDS} from './sounds.js';
 import {CommandPalette, clipRow} from './commandPalette.js';
 import {CompactView} from './compact.js';
 import {HAS_ACCENT, grabsKeyboard, inhibitScanout, onUiScale, px, uiScale} from './compat.js';
@@ -220,6 +221,9 @@ export class Controller {
         this._meetingLinks = new Map();
         /** Whether the command surface is open, and its view. */
         this._paletteOpen = false;
+        /** Whether the screen was being recorded at the last look, and the newest clip's id, for their chimes. */
+        this._recording = false;
+        this._clips = null;
 
         // Built a part at a time, frames drawn in between: all at once, it held the screen still for a tenth
         // of a second at every login and unlock. Nothing outside calls in before the last part.
@@ -357,13 +361,14 @@ export class Controller {
         this._watchIdle();
         this._installedApps = new InstalledApps();
         this._reminders = new ReminderWatcher(this._daemon, this._settings, (reminder, kind, done) => {
-            // The heads-up is quiet: no chime, no button, gone by itself.
+            // The heads-up is quiet: no button, gone by itself, one short sound.
             if (kind === 'soon') {
+                this._chime(SOUNDS.reminderSoon);
                 this._post(Alerts.reminderSoon(reminder, this._settings.get_int('reminder-alert-minutes')));
                 return;
             }
             this._post(Alerts.reminder(reminder, () => {
-                this._chime('complete');
+                this._chime(SOUNDS.reminder);
                 done();
             }, {
                 // Marked shown first: a snooze clears that mark again (see `SetDue`).
@@ -715,7 +720,7 @@ export class Controller {
                 this._render();
         });
         daemon.connect('pomodoro-finished', (_daemon, finished, next) => {
-            this._chime('complete');
+            this._chime(SOUNDS.timer);
             this._post(Alerts.pomodoroFinished(finished, next, daemon.state.pomodoro, daemon));
         });
         daemon.connect('system-event', (_daemon, event) =>
@@ -926,6 +931,11 @@ export class Controller {
     /** How long isled keeps copied items (0: until newer copies push them out). */
     _syncClipboard() {
         this._daemon.call('clipboard', 'SetRetention', this._settings.get_int('clipboard-retention-days'));
+        // A copy from anywhere lands at the top of the history: a tick, and nothing on the first read.
+        const newest = this._daemon.state.clipboard?.[0]?.id ?? null;
+        if (this._clips !== null && newest !== null && newest !== this._clips)
+            this._chime(SOUNDS.copied);
+        this._clips = newest;
     }
 
     /** An event starts soon: an alert, with Join when the event has a meeting link. Not in Do Not Disturb. */
@@ -1990,6 +2000,7 @@ export class Controller {
                 if (this._daemon.running)
                     return;
                 this._compact.serviceDown = true;
+                this._chime(SOUNDS.error);
                 this._post(Alerts.serviceDown(() => this._daemon.start()));
             });
         });
@@ -2002,6 +2013,12 @@ export class Controller {
 
     /** While others can see the screen, private text leaves the shelf, the notifications and the alert shown. */
     _syncSharing() {
+        // A recording starting or stopping says so, as its pill comes and goes.
+        const recording = Boolean(this._privacy.recording);
+        if (recording !== this._recording) {
+            this._recording = recording;
+            this._chime(recording ? SOUNDS.recordingStarted : SOUNDS.recordingStopped);
+        }
         this._shelf.sharing = this._sharing;
         this._expanded.pageNamed('notifications').sharing = this._sharing;
         // A message on screen as sharing starts loses its text at once; one gone meanwhile goes.

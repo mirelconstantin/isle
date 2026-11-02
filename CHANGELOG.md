@@ -8,6 +8,12 @@ All notable changes to Isle are listed here. The format follows
 
 ### Added
 
+- A sound for every occasion, from the sound theme in use (`src/sounds.js`): a short `message-new-instant` for
+  a reminder's heads-up, `alarm-clock-elapsed` at its hour, `complete` when a timer or focus session ends,
+  `dialog-warning` as the screen starts recording and `battery-low` as it stops, the lightest tick
+  (`audio-volume-change`) for a copy, and `dialog-error` when isled is down. All of it behind Settings →
+  Alerts → Sounds.
+
 - Calls keep their preview while you share or record your screen (Settings → Calls → While sharing, on by
   default), with a small "Sharing" or "Recording" pill on it; off, the preview gives way to the hint as before.
 - Reminders can carry a time, and the line says it: "Call the bank tomorrow 17:00" is read as a title and a

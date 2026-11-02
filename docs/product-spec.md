@@ -584,9 +584,10 @@ banner does. Right-clicking an alert puts it away without opening it.
 | Caps Lock (instant) | ⇪ | Caps Lock on / off | – | 1.5 s |
 | New song (off by default) | cover | title / artist | – | 2.6 s |
 | Timer phase ends (+ chime) | timer | Focus session done… | Start break | 8 s |
+| Reminder at its hour (+ alarm) | bell | the reminder's text | Done (primary), Snooze 10 min | sticky |
 | Screen recording started | red record icon | Recording screen | Stop | 2.6 s |
 | Notification (GNOME's sound) | app icon, large | title / first line (only who it is from while the screen is shared) | its first button ("Mark as read") | 4 s; passing (a screenshot taken) 2.5 s; critical 20 s, instant and sticky |
-| Reminder about to be due (Settings: 0–60 min before, 10 by default) | bell | the reminder in 10 min / 17:00 · Reminder | – | 6 s, no sound |
+| Reminder about to be due (Settings: 0–60 min before, 10 by default) | bell | the reminder in 10 min / 17:00 · Reminder | – | 6 s, one short sound |
 | Reminder (+ chime) | bell | the reminder / 17:00 · Reminder | Snooze 10 min, Done | 8 s, sticky |
 | Assistant done in the background (resting the pointer holds it; it opens no page) | mic | the answer / Isle Assistant (· Click to read more, when cut) | – | as long as it takes to read, at most 8 s |
 | Isle's service stopped | warning | Isle's service isn't running | Restart | 8 s |
