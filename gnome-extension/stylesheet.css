@@ -117,13 +117,9 @@
   font-weight: 500;
 }
 
-/* Closed island inside the top bar, like a notch: the bar is as tall as the island, so
- * maximised windows start below it. Comes after the compact bar's height so it wins. */
+/* Closed island inside the top bar, like a notch: maximised windows start below the bar, the island as tall
+ * or, with space below it (Settings), a little shorter. Comes after the compact bar's height so it wins. */
 #panel.isle-notch-bar { height: 32px; }
-/* With space below the island (Settings), the bar grows by GAP_PX in shell.js; its buttons keep the
- * island's 32 px band, the space left empty along the bottom. */
-#panel.isle-notch-gap { height: 36px; }
-#panel.isle-notch-gap .panel-button { margin-bottom: 4px; }
 
 /* Isle's bar is black or see-through in light and dark style alike: its text and icons stay white,
  * as GNOME's light style has them over the overview (it makes them near-black otherwise). */
@@ -170,11 +166,16 @@
 
 .isle-compact-clock { font-size: 17px; font-weight: 600; letter-spacing: -0.2px; }
 .isle-compact-clock-box { spacing: 6px; }
+/* AM or PM after the time with a 12-hour clock: 80% of its size, a little dimmer, a space's width from it. */
+.isle-compact-clock-row { spacing: 4px; }
+.isle-compact-meridiem { font-size: 13.6px; font-weight: 600; color: rgba(255, 255, 255, 0.72); }
 
 /* Inside the top bar everything is sized like the bar's own text. */
 .isle-compact-in-bar .isle-compact-start { padding-right: 28px; }
 .isle-compact-in-bar .isle-compact-end { padding-left: 28px; }
 .isle-compact-in-bar .isle-compact-clock { font-size: 15px; letter-spacing: -0.1px; }
+.isle-compact-in-bar .isle-compact-clock-row { spacing: 3px; }
+.isle-compact-in-bar .isle-compact-meridiem { font-size: 12px; }
 
 .isle-unseen-dot {
   width: 6px;
@@ -443,6 +444,8 @@
 }
 .isle-header-date { font-size: 13px; color: rgba(255, 255, 255, 0.9); }
 .isle-header-time { font-size: 13px; font-weight: 600; }
+.isle-header-time-box { spacing: 3px; }
+.isle-header-meridiem { font-size: 10.4px; font-weight: 600; color: rgba(255, 255, 255, 0.72); }
 .isle-header-settings { padding: 4px; color: rgba(255, 255, 255, 0.6); }
 .isle-header-settings:hover { color: #ffffff; background-color: rgba(255, 255, 255, 0.1); }
 .isle-header-status { spacing: 10px; }

@@ -7,21 +7,34 @@ import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 
 let interfaceSettings = null;
+// Isle's own choice (Settings → Appearance → Clock): 'system', '24h' or '12h'.
+let clockFormat = 'system';
 
 /** Lets go of GNOME's settings once Isle is turned off; they are read again when needed. */
 export function release() {
     interfaceSettings = null;
+    clockFormat = 'system';
 }
 
-/** Whether the user prefers a 12-hour clock in GNOME's settings. */
+/** Isle's clock setting, as controller.js reads it. */
+export function setClockFormat(format) {
+    clockFormat = format;
+}
+
+/** Whether times show with a 12-hour clock: as Isle's setting says, else as GNOME's. */
 export function uses12Hour() {
+    if (clockFormat === '24h' || clockFormat === '12h')
+        return clockFormat === '12h';
     interfaceSettings ??= new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
     return interfaceSettings.get_string('clock-format') === '12h';
 }
 
-/** "14:05", or "2:05" with a 12-hour clock. */
-export function clockTime(dateTime = GLib.DateTime.new_now_local()) {
-    return dateTime.format(uses12Hour() ? '%l:%M' : '%H:%M').trim();
+/** The clock's two parts: {time: "14:05"} or, with a 12-hour clock, {time: "2:05", meridiem: "PM"} (none where the
+ * language has no such word). Two labels show them, the second smaller and dimmer (see stylesheet.css). */
+export function clockParts(dateTime = GLib.DateTime.new_now_local(), twelveHour = uses12Hour()) {
+    const time = dateTime.format(twelveHour ? '%l:%M' : '%H:%M').trim();
+    const meridiem = twelveHour ? dateTime.format('%p').trim() : '';
+    return {time, meridiem};
 }
 
 /** "14:05", or "2:05 PM" with a 12-hour clock: a time of day that stands alone. */
