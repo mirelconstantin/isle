@@ -13,7 +13,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as Signals from 'resource:///org/gnome/shell/misc/signals.js';
 import {getMixerControl} from 'resource:///org/gnome/shell/ui/status/volume.js';
 
-import {BROWSERS, callStreamOf, callWindowIndex, isEngineName, keysMatchApp, ownerOfDump, serviceOf, streamOwner} from './callServices.js';
+import {BROWSERS, callStreamOf, callWindowIndex, isEngineName, keysMatchApp, serviceOf, streamNodesOf, streamOwner} from './callServices.js';
 import {LEVEL_METERS} from './privacy.js';
 
 /** The microphone must be held this long to count: sites open it briefly to ask for permission. */
@@ -88,8 +88,6 @@ export class CallMonitor extends Signals.EventEmitter {
         this._timeouts = {start: 0, end: 0, recheck: 0, standIn: 0};
         /** The call's window is a guess made as its own closed, until its tab shows where it went. */
         this._standIn = false;
-        this._source = null;
-        this._sourceIds = [];
         this._windowIds = [];
         /** Each window watched during the call: {ids, gained, gainedAt}, the service its title came to name, and when. */
         this._watched = new Map();
@@ -102,14 +100,12 @@ export class CallMonitor extends Signals.EventEmitter {
 
         this._mixerIds = [
             ...['stream-added', 'stream-removed'].map(signal => this._mixer.connect(signal, () => this._sync())),
-            ...['default-source-changed', 'state-changed'].map(signal => this._mixer.connect(signal, () => this._watchSource())),
         ];
         this._settingsId = settings.connect('changed::call-activity', () => this._sync());
         // A tab torn off into a window of its own (the call's, say) comes as a new window, its title a moment later.
         this._windowCreatedId = global.display.connect('window-created', (_display, window) => this._watchWindow(window, true));
         // The camera makes it a video call; screen sharing hides the preview.
         this._privacyId = privacy.connect('changed', () => this._changed());
-        this._watchSource();
         this._sync();
     }
 
@@ -118,50 +114,63 @@ export class CallMonitor extends Signals.EventEmitter {
         return this.active && this._privacy.camera;
     }
 
-    /** Whether the call's microphone is muted: its own stream, the input it records from, or what `wpctl` was
-     * asked for when neither answered. */
+    /** Whether the call's microphone is muted: its own stream, or what `wpctl` was asked for when Gvc did not
+     * carry a stream's mute. Never the input itself, which other apps may be recording from. */
     get muted() {
-        return Boolean(this._forcedMute || this._stream?.is_muted || this._source?.is_muted);
+        return Boolean(this._forcedMute || this._stream?.is_muted);
     }
 
-    /** Mutes or unmutes the call's microphone from the call's button. */
+    /** Mutes or unmutes the call's microphone from the call's button: that app's own stream, and nothing else. */
     toggleMuted() {
         const wanted = !this.muted;
-        this._forcedMute = false;
-        let asked = false;
-        // The call's own stream first, so that app alone is silenced (and a call recording from an input that is
-        // not the default one still answers), then the default input as GNOME's own microphone toggle does.
-        for (const target of [this._stream, this._source]) {
-            if (!target)
-                continue;
-            target.change_is_muted(wanted);
-            asked = true;
-        }
-        // Gvc carries neither on some PipeWire systems (a stream's mute, or an input it has not been told of):
-        // the default input is asked through `wpctl`, which needs no pactl, and the button follows the asking.
-        this._later('mute', asked ? 250 : 0, () => {
-            if (this.muted === wanted) {
+        // What `wpctl` set last time: Gvc may not have carried it, so the node is told again rather than trusted.
+        const forced = this._forcedMute;
+        this._stream?.change_is_muted(wanted);
+        // Gvc carries no stream mute on some PipeWire systems (those without pactl): the call's own node is told
+        // through `wpctl` instead, by the stream's name, so that the app alone is silenced.
+        this._later('mute', 250, () => {
+            if (!forced && this._stream?.is_muted === wanted) {
+                this._forcedMute = false;
+                this._changed();
                 console.log(`Isle: mute → ${wanted}, by Gvc`);
                 return;
             }
-            this._forcedMute = wanted;
             this._wpctlMute(wanted);
-            this._changed();
-            console.log(`Isle: mute → ${wanted}, by wpctl (Gvc had stream ${this._stream?.is_muted ?? 'none'}, ` +
-                `source ${this._source?.is_muted ?? 'none'})`);
         });
         return true;
     }
 
-    /** `wpctl set-mute @DEFAULT_AUDIO_SOURCE@ 0|1`: the microphone, without Gvc or pactl. */
+    /** Mutes the call's own streams through `wpctl`, which needs no pactl; never the input other apps use. */
     _wpctlMute(muted) {
+        const name = this._stream?.get_name();
+        if (!name) {
+            console.warn('Isle: no stream to mute');
+            return;
+        }
+        this._ownerCommand(['pw-dump'], text => streamNodesOf(text, name), nodes => {
+            if (!nodes.length) {
+                console.warn(`Isle: no input node named ${name} to mute`);
+                return;
+            }
+            for (const node of nodes)
+                this._spawn(['wpctl', 'set-mute', String(node.id), muted ? '1' : '0']);
+            this._forcedMute = muted;
+            this._changed();
+            console.log(`Isle: mute → ${muted}, by wpctl (${nodes.length} node(s) named ${name})`);
+        });
+    }
+
+    /** Runs a command for its effect alone; false when it is not there. */
+    _spawn(argv) {
         try {
             const launcher = new Gio.SubprocessLauncher({
                 flags: Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_SILENCE,
             });
-            launcher.spawnv(['wpctl', 'set-mute', '@DEFAULT_AUDIO_SOURCE@', muted ? '1' : '0']);
+            launcher.spawnv(argv);
+            return true;
         } catch {
-            console.warn('Isle: wpctl is not there to mute the microphone');
+            console.warn(`Isle: ${argv[0]} is not there`);
+            return false;
         }
     }
 
@@ -327,7 +336,7 @@ export class CallMonitor extends Signals.EventEmitter {
                 this._ownerFound(stream, index, owner);
                 return;
             }
-            this._ownerCommand(['pw-dump'], text => ownerOfDump(text, stream.get_name()),
+            this._ownerCommand(['pw-dump'], text => streamNodesOf(text, stream.get_name())[0] ?? null,
                 found => this._ownerFound(stream, index, found));
         });
         return this._owner.app;
@@ -526,19 +535,6 @@ export class CallMonitor extends Signals.EventEmitter {
         });
     }
 
-    /** Moves the mute listener to the current default microphone. */
-    _watchSource() {
-        this._sourceIds.forEach(id => this._source.disconnect(id));
-        this._sourceIds = [];
-        this._source = this._mixer.get_default_source();
-        if (this._source)
-            this._sourceIds = [this._source.connect('notify::is-muted', () => {
-            this._forcedMute = false;
-            this._changed();
-        })];
-        this._changed();
-    }
-
     /** Runs `callback` once after `ms`, under `name` so it can be cancelled. */
     _later(name, ms, callback) {
         this._timeouts[name] = GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => {
@@ -568,7 +564,6 @@ export class CallMonitor extends Signals.EventEmitter {
         this._unwatchWindows();
         global.display.disconnect(this._windowCreatedId);
         this._setWindow(null);
-        this._sourceIds.forEach(id => this._source.disconnect(id));
         this._streamIds.forEach(id => this._mutedStream?.disconnect(id));
         this._mixerIds.forEach(id => this._mixer.disconnect(id));
         this._settings.disconnect(this._settingsId);

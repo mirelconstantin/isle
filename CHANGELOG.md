@@ -49,9 +49,10 @@ All notable changes to Isle are listed here. The format follows
   Signal, Skype, Webex, Google Chat, Guilded, Revolt, Zulip, Mattermost, Whereby, GoTo Meeting, BlueJeans,
   Amazon Chime, Viber, WeChat, Mumble, TeamSpeak and DingTalk — installed or in a browser, and a call in any
   other app is named after the app itself. The journal says what a call was taken for as it starts.
-- The call page's **Mute** acts on the call's own microphone stream, so it works when the call opened an input
-  that is not the default one, and does not silence other apps; **Open** brings the call's window out of the
-  taskbar too, instead of leaving a minimised window behind.
+- The call page's **Mute** acts on the call's own microphone stream alone — never the input itself, so other
+  apps keep recording — and, where Gvc carries no stream mute (a PipeWire system without pactl), the call's
+  own node is muted through `wpctl`; **Open** brings the call's window out of the taskbar too, instead of
+  leaving a minimised window behind.
 - With the island following the display in use, the closed island keeps the size it has in the bar on a
   display without a top bar, or where a taskbar took the panel: it no longer shrinks or vanishes when
   it moves there, and the open island's header no longer rides up into the screen's edge.

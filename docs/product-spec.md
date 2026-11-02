@@ -304,9 +304,9 @@ the call's name — the service its window names ("Google Meet", "Zoom", "Discor
 "Microsoft Teams", "Slack", "WhatsApp", "Telegram", "Signal", "Webex", "Jitsi",
 "Google Chat"…), or the app's own name when the window names none — "Voice call" or
 "Video call" (while the camera is on) with the length in green, and two round
-buttons with captions: **Mute** (the call's own microphone stream, so that app
-alone, and the default input when there is no stream; white and "Muted" while
-on) and **Open** (brings the call's window to the front, out of the taskbar
+buttons with captions: **Mute** (the call's own microphone stream and nothing else — that app alone
+is silenced, and other apps keep recording from the same microphone; white and
+"Muted" while on) and **Open** (brings the call's window to the front, out of the taskbar
 too, switching workspace if needed, and closes the island).
 When the call ends the tab goes and an open island moves to the next page.
 

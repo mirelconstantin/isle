@@ -79,20 +79,22 @@ export function streamOwner(text, index) {
     return null;
 }
 
-/** Of `pw-dump`'s JSON, the process holding the input stream named `name`: {pid, binary} (0 and null when not
- * said), or null. What `streamOwner` reads from `pactl`, for a PipeWire system without pactl installed. */
-export function ownerOfDump(text, name) {
+/** Of `pw-dump`'s JSON, every input stream named `name` — the node's id, the process holding it and its
+ * binary — as `[{id, pid, binary}]` (pid 0 and binary null when not said), [] when none. What `streamOwner`
+ * reads from `pactl`, for a PipeWire system without pactl installed: a node's id is what `wpctl` mutes. */
+export function streamNodesOf(text, name) {
     if (!name)
-        return null;
+        return [];
     let objects;
     try {
         objects = JSON.parse(text ?? '');
     } catch {
-        return null;
+        return [];
     }
     if (!Array.isArray(objects))
-        return null;
+        return [];
     const wanted = name.toLowerCase();
+    const found = [];
     for (const object of objects) {
         const props = object?.info?.props ?? {};
         if (props['media.class'] !== 'Stream/Input/Audio')
@@ -103,9 +105,9 @@ export function ownerOfDump(text, name) {
         if (!names.includes(wanted))
             continue;
         const pid = Number.parseInt(props['application.process.id'] ?? '', 10);
-        return {pid: pid > 0 ? pid : 0, binary: props['application.process.binary'] ?? null};
+        found.push({id: object.id, pid: pid > 0 ? pid : 0, binary: props['application.process.binary'] ?? null});
     }
-    return null;
+    return found;
 }
 
 /** The call service a window title names, or null. */

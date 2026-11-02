@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 
-import {callStreamOf, callWindowIndex, isEngineName, keysMatchApp, ownerOfDump, serviceOf, streamOwner} from '../../gnome-extension/src/callServices.js';
+import {callStreamOf, callWindowIndex, isEngineName, keysMatchApp, serviceOf, streamNodesOf, streamOwner} from '../../gnome-extension/src/callServices.js';
 
 const chrome = (title, focused = false) => ({title: `${title} - Google Chrome`, focused});
 
@@ -102,12 +102,12 @@ test('a stream is traced to its process in pw-dump too, where pactl is not insta
             'application.process.binary': 'chrome',
         }}},
     ]);
-    assert.deepEqual(ownerOfDump(dump, 'Zoom'), {pid: 4321, binary: 'zoom'});
+    assert.deepEqual(streamNodesOf(dump, 'Zoom'), [{id: 42, pid: 4321, binary: 'zoom'}]);
     // Only an input stream: the same name on an output is another node.
-    assert.deepEqual(ownerOfDump(dump, 'Chromium input'), {pid: 327, binary: 'chrome'});
-    assert.equal(ownerOfDump(dump, 'Firefox'), null);
-    assert.equal(ownerOfDump('not json', 'Zoom'), null);
-    assert.equal(ownerOfDump(dump, ''), null);
+    assert.deepEqual(streamNodesOf(dump, 'Chromium input'), [{id: 44, pid: 327, binary: 'chrome'}]);
+    assert.deepEqual(streamNodesOf(dump, 'Firefox'), []);
+    assert.deepEqual(streamNodesOf('not json', 'Zoom'), []);
+    assert.deepEqual(streamNodesOf(dump, ''), []);
 });
 
 test("a voice engine's name is never taken for its app's", () => {
