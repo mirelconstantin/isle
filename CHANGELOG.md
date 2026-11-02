@@ -8,6 +8,15 @@ All notable changes to Isle are listed here. The format follows
 
 ### Added
 
+- Reminders can carry a time, and the line says it: "Call the bank tomorrow 17:00" is read as a title and a
+  time (`today`, `tomorrow`, `tonight`, a weekday, `on 3 Nov`, `in 10 min`, or just `17:00`), and the new row
+  shows what it read. The list is ordered late first, then the soonest, then the untimed; each row says its
+  time at the right ("Tomorrow 09:30", "12m late" in the page's orange) and clicking it changes it.
+- A quiet heads-up before a reminder (Settings → Alerts: 0–60 minutes, ten by default), its time left counting
+  down in the closed island, and the reminder itself at its hour with **Snooze 10 min** and **Done**. The
+  assistant's reminders are these rows now: one list, not two.
+- The Reminders page takes the keyboard: ↑↓ between rows (and past the last into the new one), Space ticks,
+  Enter renames, Delete removes, and a focused row shows ▶ and × as the pointer does.
 - A Devices page listing the devices connected now — Bluetooth, or a mouse or keyboard on its own
   receiver (Logitech's HID++, whose battery the desktop's Power settings show too) — each with the
   battery it reports ("No battery" for one that reports none, as many phones do).

@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-// Older lists also stored due times and alert flags; serde skips them.
+// Older lists stored a due time as `due_at_ms`; serde skips that name.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TodoItem {
     pub id: u64,
@@ -15,6 +15,12 @@ pub struct TodoItem {
     /// When the task was ticked off.
     #[serde(default)]
     pub done_at_ms: Option<i64>,
+    /// When it is due, in milliseconds since the Unix epoch; `None` for a plain to-do.
+    #[serde(default)]
+    pub due_ms: Option<i64>,
+    /// Whether its due alert was already shown, so it is not shown again after a restart.
+    #[serde(default)]
+    pub alerted: bool,
 }
 
 /// The tasks in the order they were added, with ids that never repeat.
@@ -30,8 +36,8 @@ impl TodoList {
         &self.items
     }
 
-    /// Adds a task and returns its id; `None` for a blank title.
-    pub fn add(&mut self, title: &str) -> Option<u64> {
+    /// Adds a task due at `due_ms` (or not at all) and returns its id; `None` for a blank title.
+    pub fn add(&mut self, title: &str, due_ms: Option<i64>) -> Option<u64> {
         let title = title.trim();
         if title.is_empty() {
             return None;
@@ -42,6 +48,8 @@ impl TodoList {
             title: title.to_owned(),
             done: false,
             done_at_ms: None,
+            due_ms,
+            alerted: false,
         });
         Some(self.next_id)
     }
@@ -76,6 +84,23 @@ impl TodoList {
         self.items.len() != before
     }
 
+    /// Sets when a task is due, or clears it, and lets it be shown again; false when it was not found.
+    pub fn set_due(&mut self, id: u64, due_ms: Option<i64>) -> bool {
+        self.find(id)
+            .map(|item| {
+                item.due_ms = due_ms;
+                item.alerted = false;
+            })
+            .is_some()
+    }
+
+    /// Notes that a task's due alert was shown (or, snoozed, that it was not); false when not found.
+    pub fn set_alerted(&mut self, id: u64, alerted: bool) -> bool {
+        self.find(id)
+            .map(|item| item.alerted = alerted)
+            .is_some()
+    }
+
     /// Deletes a task; returns whether it was there.
     pub fn remove(&mut self, id: u64) -> bool {
         let before = self.items.len();
@@ -101,8 +126,8 @@ mod tests {
     #[test]
     fn titles_are_trimmed_and_blank_ones_refused() {
         let mut list = TodoList::default();
-        assert_eq!(list.add("   "), None);
-        let id = list.add("  Call mum @18:30 ").unwrap();
+        assert_eq!(list.add("   ", None), None);
+        let id = list.add("  Call mum @18:30 ", None).unwrap();
         // Text that once meant a due time is now just part of the title.
         assert_eq!(list.items()[0].title, "Call mum @18:30");
         assert_eq!(list.items()[0].id, id);
@@ -111,7 +136,7 @@ mod tests {
     #[test]
     fn ticking_off_records_when() {
         let mut list = TodoList::default();
-        let id = list.add("A").unwrap();
+        let id = list.add("A", None).unwrap();
         assert!(list.set_done(id, true, 42));
         assert_eq!(list.items()[0].done_at_ms, Some(42));
         assert!(list.set_done(id, false, 50));
@@ -122,9 +147,9 @@ mod tests {
     #[test]
     fn finished_tasks_leave_the_next_day() {
         let mut list = TodoList::default();
-        let old = list.add("Yesterday").unwrap();
-        let today = list.add("Today").unwrap();
-        list.add("Open");
+        let old = list.add("Yesterday", None).unwrap();
+        let today = list.add("Today", None).unwrap();
+        list.add("Open", None);
         list.set_done(old, true, 100);
         list.set_done(today, true, 1_000);
         assert!(list.drop_done_before(500));
@@ -135,10 +160,33 @@ mod tests {
     #[test]
     fn rename_rejects_empty_titles() {
         let mut list = TodoList::default();
-        let id = list.add("A").unwrap();
+        let id = list.add("A", None).unwrap();
         assert!(!list.rename(id, "  "));
         assert!(list.rename(id, "B"));
         assert_eq!(list.items()[0].title, "B");
+    }
+
+    #[test]
+    fn a_due_time_is_kept_and_can_change() {
+        let mut list = TodoList::default();
+        let id = list.add("Call the bank", Some(1_000)).unwrap();
+        assert_eq!(list.items()[0].due_ms, Some(1_000));
+        assert!(list.set_due(id, Some(2_000)));
+        assert_eq!(list.items()[0].due_ms, Some(2_000));
+        assert!(list.set_due(id, None));
+        assert_eq!(list.items()[0].due_ms, None);
+        assert!(!list.set_due(id + 1, Some(1)));
+    }
+
+    #[test]
+    fn a_new_due_time_lets_the_alert_show_again() {
+        let mut list = TodoList::default();
+        let id = list.add("Call the bank", Some(1_000)).unwrap();
+        assert!(list.set_alerted(id, true));
+        assert!(list.items()[0].alerted);
+        assert!(list.set_due(id, Some(2_000)));
+        assert!(!list.items()[0].alerted);
+        assert!(!list.set_alerted(id + 1, true));
     }
 
     #[test]

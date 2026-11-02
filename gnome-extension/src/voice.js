@@ -1223,17 +1223,22 @@ const ACTIONS = {
         return whenPlayerOf(daemon, launched, () => called(daemon, 'media', method));
     },
     focus: ({command}, {daemon}) => daemon.call('pomodoro', command === 'stop' ? 'Stop' : 'Start'),
-    add_task: ({text}, {daemon}) => text && daemon.call('todo', 'Add', text),
+    add_task: ({text}, {daemon}) => text && daemon.call('todo', 'Add', text, 0),
     // To the calendar the Calendar page adds to (an account's, or Isle's own).
     add_event: ({date, text}, {daemon, eventCalendar}) => date && text && daemon.addEvent(eventCalendar(), date, text),
     done_task: ({id}, {daemon}) => Number.isInteger(id) && daemon.call('todo', 'SetDone', id, true),
     remove_task: ({id}, {daemon}) => Number.isInteger(id) && daemon.call('todo', 'Remove', id),
-    cancel_reminder: ({id}, {daemon}) => Number.isInteger(id) && daemon.call('reminders', 'Dismiss', id),
+    cancel_reminder: ({id}, {daemon}) => Number.isInteger(id) && daemon.call('todo', 'Remove', id),
     remove_event: ({id}, {daemon}) => Number.isInteger(id) && daemon.call('calendar', 'Remove', id),
-    remind: ({minutes, text}, {daemon}) => {
-        if (!text || !(minutes > 0))
-            return failed('a reminder needs its minutes and its words');
-        return called(daemon, 'reminders', 'Add', Math.round(minutes * 60000), text);
+    // "tomorrow 9am" is read by the daemon, from the same line the Reminders page reads.
+    remind: async ({when, text}, {daemon}) => {
+        if (!text)
+            return failed('a reminder needs its words');
+        const parsed = await daemon.attempt('todo', 'Parse', when ? `${text} ${when}` : text);
+        if (parsed.result === null)
+            return failed(parsed.error ?? 'could not read that reminder');
+        const {title, due_ms} = JSON.parse(parsed.result);
+        return called(daemon, 'todo', 'Add', title, due_ms);
     },
     volume: ({level, command}, {audio}) => {
         if (!audio.hasOutput)

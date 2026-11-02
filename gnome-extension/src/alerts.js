@@ -14,6 +14,8 @@ import {hasOwnIcon} from './widgets.js';
 const OSD_DURATION = 1500;
 const STATUS_DURATION = 2600;
 const REMINDER_DURATION = 8000;
+/** The quiet heads-up before a reminder: read, then gone. */
+const SOON_DURATION = 6000;
 /** As long as GNOME's own banner; a passing one (a screenshot taken) less. The pointer on it holds it. */
 const NOTIFICATION_DURATION = 4000;
 const TRANSIENT_NOTIFICATION_DURATION = 2500;
@@ -380,8 +382,11 @@ export function usage(provider, window, percent, resetsAt, critical) {
     };
 }
 
-/** A reminder the voice assistant set ("remind me in ten minutes to..."). `onShown` once on screen. */
-export function reminder({id, text}, onShown) {
+/** A clock time for an alert's subtitle ("17:00", "5:00 PM"). */
+const clockOf = ms => Format.timeOfDay(GLib.DateTime.new_from_unix_local(Math.floor(ms / 1000)));
+
+/** A reminder at its hour ("Call the bank", "17:00 · Reminder"): sticky, with its chime, Done and Snooze. */
+export function reminder({id, text, due_ms}, onShown, {onDone, onSnooze} = {}) {
     return {
         // Its own key, so reminders due together queue instead of replacing each other.
         key: `reminder:${id}`,
@@ -390,12 +395,31 @@ export function reminder({id, text}, onShown) {
         title: text,
         // Its words are the point: two lines, as a meeting's title.
         titleLines: 2,
-        subtitle: 'Reminder',
+        subtitle: due_ms ? `${clockOf(due_ms)} · Reminder` : 'Reminder',
         tone: 'neutral',
         duration: REMINDER_DURATION,
         // Its time only runs while someone is there to see it.
         sticky: true,
         onShown,
+        actions: [
+            ...(onSnooze ? [{label: 'Snooze 10 min', callback: onSnooze}] : []),
+            ...(onDone ? [{label: 'Done', callback: onDone, primary: true}] : []),
+        ],
+    };
+}
+
+/** The quiet heads-up before a reminder: no chime, no button, gone by itself. */
+export function reminderSoon({id, text, due_ms}, minutes) {
+    return {
+        // Its own key: the heads-up and the hour are two different alerts.
+        key: `reminder-soon:${id}`,
+        icon: 'isle-bell',
+        motion: 'ring',
+        title: `${text} in ${minutes} min`,
+        titleLines: 2,
+        subtitle: due_ms ? `${clockOf(due_ms)} · Reminder` : 'Reminder',
+        tone: 'neutral',
+        duration: SOON_DURATION,
     };
 }
 

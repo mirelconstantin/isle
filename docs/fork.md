@@ -31,6 +31,7 @@ Written against **upstream v1.5.1** (`5845d74`), merged in `531a14b`.
 |---|---|---|---|
 | Command surface, Super+K | `commandPalette.js`, `controller.js` (`_palette*`, `_onCommandKey`, `_syncCommandShortcut`, `_paletteData`), `expanded.js` (`PAGE_TABS`), `stylesheet.css` | `Island.addView`, the `_render` presentation switch, `Main.pushModal` keyboard grabs, `ExpandedView.pages`, `CalendarPage.todayEvents` | The `palette` case in `_render` still has `VOICE_RADIUS`/`PEEK_SHOULDER`/`PEEK_TOP_GLASS`; `_onClick` and `_onHoverChanged` still return early while `_paletteOpen`; `collapse()` still closes it first |
 | Clipboard stack, Super+Alt+V | `pages/clips.js`, `pages/shelf.js` (`_setStackMode`, `_syncStackBar`, `pasteNext`, `enterStack`), `clipboardQuery.js`, `controller.js` (`_syncStackShortcut`, `_onStackKey`, `_syncClipboard`) | `Clipboard1`, `ShelfPage`'s controls row, `Main.wm.addKeybinding` | The shelf's fields it toggles (`_clear`, `_confirm`, `_search`, `_searchButton`, `_searchSpacer`, `_clipboardControls`) still exist; `clipboardQuery.js` still matches `isled`'s search |
+| Timed reminders | `reminderRules.js`, `pages/tasks.js`, `reminders.js`, `alerts.js` (`reminder`, `reminderSoon`), `compact.js` (the countdown), `isle-core/src/when.rs`, `isle-daemon/src/todo.rs`, `assistant/agenda.rs` | `Todo1` (ours: `Parse`, `SetDue`, `SetAlerted`, `Add(text, due_ms)`), `CompactView._refresh`'s right slot and `_fit`, `PeekView`'s `actions` | `Reminders1` stays gone; the agenda lists timed to-dos as reminders; the countdown must keep taking the right slot only when it is free |
 | Devices page | `pages/devices.js`, `expanded.js` (`TABS.devices`), `controller.js` (`_pageMakers`), `prefs.js` (`PAGES`), `stylesheet.css` | `_pageMakers()` order, `TABS`, `System1.State` (`bluetooth` list) | The page is still added after Usage, and `hidden-pages` still reaches it |
 | Timer figures, next meeting, reminder ▶ | `pages/timer.js` (`_buildTask`, `_buildStats`, `_buildNextMeeting`, `_syncStats`, `_syncNextMeeting`, `get tint`), `pages/tasks.js` (`focus-task`), `controller.js` (`_focusTask`, `_setMeeting`, `_onNextEvent`) | `TimerPage`'s steppers column and Start slot, `pomodoro` `State.history`, `CalendarPage`'s `next-event` | The rows are still children of the steppers column; `_syncLock` still locks only the Work/Break rows; `pageNamed('focus')` still matches `this.name` |
 | Timed Do Not Disturb | `notifications.js` (`dndUntil`, `setDndFor`, `setDndUntilTomorrow`, `_clearTimedDnd`, `_resumeTimedDnd`), `pages/notifications.js` (the chevron), `focusMode.js` (`_timedDndActive`) | `NotificationCenter.dnd`, upstream's `focus-dnd-owned`, `show-banners` | A focus session and a timed DND still do not turn each other off; `dnd-until` survives a restart |
@@ -77,14 +78,17 @@ The others, in order of how often they bite:
 | `clipboard-stack-shortcut` | `as` | `<Super><Alt>v` | Paste next |
 | `clipboard-retention-days` | `i` | `0` (until pushed out) | `Clipboard1.SetRetention` |
 | `focus-task-id`, `focus-task-title` | `s` | `''` | A reminder as the timer's task |
+| `reminder-alert-minutes` | `i` | `10` | The heads-up before a reminder (0: none) |
 | `dnd-until` | `x` | `0` | Timed DND's end, kept across restarts |
 | `dnd-owned` | `b` | `false` | Timed DND turned it on, so it may turn it off |
 
 Shared, not ours: `focus-dnd-owned` is upstream's; our timed DND reads it so a
 focus session and a timed DND leave each other alone.
 
-D-Bus we added: `Clipboard1.SetRetention(x days)`, and `history` in
-`Pomodoro1.State`. `System1.State`'s `bluetooth` list is upstream's; our daemon
+D-Bus we added: `Clipboard1.SetRetention(x days)`, `history` in
+`Pomodoro1.State`, and `Todo1`'s `Parse`, `SetDue`, `SetAlerted` and its
+`Add(text, due_ms)` (with `due_ms` and `alerted` in `Items`). `Reminders1` is gone:
+`reminders.json` is folded into `todo.json` once. `System1.State`'s `bluetooth` list is upstream's; our daemon
 makes it include a mouse or keyboard on its own receiver.
 
 ## Invariants (do not lose these in a merge)

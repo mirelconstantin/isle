@@ -74,6 +74,8 @@ const STILL_OUTSIDE_MS = 30000;
 const COLLAPSE_DELAY_MS = 300;
 /** An alert the pointer rested on stays this long once it leaves, to finish reading. */
 const ALERT_LEAVE_MS = 1500;
+/** How long a reminder's Snooze puts it off. */
+const SNOOZE_MS = 10 * 60 * 1000;
 /** Touchpad travel over an alert that puts it away (up) or opens the island (down); a wheel's click is one. */
 const ALERT_SWIPE = 1.5;
 /** A pause this long between scroll events starts a new swipe. */
@@ -351,10 +353,25 @@ export class Controller {
         this._osd = new OsdHook((icon, label, level, maxLevel) => this._showOsd(icon, label, level, maxLevel));
         this._watchIdle();
         this._installedApps = new InstalledApps();
-        this._reminders = new ReminderWatcher(this._daemon, (reminder, done) => {
+        this._reminders = new ReminderWatcher(this._daemon, this._settings, (reminder, kind, done) => {
+            // The heads-up is quiet: no chime, no button, gone by itself.
+            if (kind === 'soon') {
+                this._post(Alerts.reminderSoon(reminder, this._settings.get_int('reminder-alert-minutes')));
+                return;
+            }
             this._post(Alerts.reminder(reminder, () => {
                 this._chime('complete');
                 done();
+            }, {
+                // Marked shown first: a snooze clears that mark again (see `SetDue`).
+                onSnooze: () => {
+                    done();
+                    this._daemon.call('todo', 'SetDue', reminder.id, Date.now() + SNOOZE_MS);
+                },
+                onDone: () => {
+                    done();
+                    this._daemon.call('todo', 'SetDone', reminder.id, true);
+                },
             }));
         });
         this._syncVoiceEnabled();
@@ -438,6 +455,20 @@ export class Controller {
         // A reminder's ▶: it becomes the focus session's task, and the timer starts.
         expanded.pageNamed('reminders').connect('focus-task', (_page, id, title) => this._focusTask(id, title));
         return expanded;
+    }
+
+    /** A line typed into the command surface becomes a reminder, its time read as the page reads it. */
+    async _addTask(line) {
+        const answer = await this._daemon.call('todo', 'Parse', line);
+        let parsed = null;
+        if (answer) {
+            try {
+                parsed = JSON.parse(answer);
+            } catch (e) {
+                parsed = null;
+            }
+        }
+        this._daemon.call('todo', 'Add', parsed?.title ?? line, parsed?.due_ms ?? 0);
     }
 
     /** Starts a focus session on a reminder, and shows the Focus page. */
@@ -723,7 +754,7 @@ export class Controller {
         this._monitor = this._wantedMonitor();
         // On a black bar the island grows out of it, its shoulders below the
         // bar; on any other it hangs from the top of the screen like a notch.
-        this._island.topInset = this._blendsIn ? this._topBar.height : 0;
+        this._island.topInset = this._blendsIn ? this._barHeight : 0;
         this._island.monitor = this._monitor;
         // Without a top bar (another display) the open island's header is its own. In the bar, it keeps to the
         // closed island's band, above the space below it.
@@ -786,6 +817,21 @@ export class Controller {
     _syncMonitor() {
         if (this._monitor && this._presentation === 'compact' && this._wantedMonitor() !== this._monitor)
             this._updateGeometry();
+    }
+
+    /**
+     * The top bar's height in stage pixels, or the height a bar has when the bar reports one no bar has (a
+     * theme or another extension gone wrong): an island sized from that would be as tall as the screen.
+     */
+    get _barHeight() {
+        const height = this._topBar.height;
+        if (Number.isFinite(height) && height > 0 && height <= px(120))
+            return height;
+        if (!this._barWarned && this._topBar.isTopPanel) {
+            this._barWarned = true;
+            console.warn(`Isle: the top bar says it is ${height} px tall; using a bar's height instead`);
+        }
+        return this._topBar.isTopPanel ? px(32) : 0;
     }
 
     /** Whether the island is on the main display. */
@@ -1069,14 +1115,15 @@ export class Controller {
         // A display without the top bar: the island hangs from its top edge. Sizes are in stage pixels; the
         // CSS ones (padding) are divided by `scale` again, as St multiplies them.
         const scale = uiScale();
-        const top = this._onBar ? this._topBar.height : 0;
+        const top = this._onBar ? this._barHeight : 0;
         // The closed island keeps the size it has in the bar on a display without one: moving the island
         // there must not shrink it (see the compact case below). A panel another extension moved to the
         // bottom has no bar height to take that size from, so it hangs at the notch's.
-        const inBar = this._settings.get_boolean('island-in-top-bar') && this._topBar.height > 0;
+        const inBar = this._settings.get_boolean('island-in-top-bar') && this._barHeight > 0;
         // Inside the bar it leaves the bar's last few pixels free (Settings), open as well as closed. Its size
         // comes from the bar, not from `top`: off the bar the island keeps it and hangs from the screen.
-        const band = this._topBar.height - (inBar ? this._topBar.gap : 0);
+        const gap = this._topBar.gap;
+        const band = this._barHeight - (inBar && Number.isFinite(gap) ? gap : 0);
         // Before measuring it: inside the bar it is smaller.
         this._compact.inBar = inBar;
 
@@ -1128,6 +1175,17 @@ export class Controller {
             };
             view = this._compact;
             view.style = inBar ? null : `padding-top: ${top / scale}px;`;
+        }
+        // Nothing Isle draws is taller than the display it is on; one that says so is wrong, and saying it
+        // once puts the reason in the log.
+        const tallest = (this._monitor?.height ?? px(4000)) - 1;
+        if (!Number.isFinite(size.height) || size.height > tallest) {
+            if (!this._sizeWarned) {
+                this._sizeWarned = true;
+                console.warn(`Isle: ${presentation} would be ${size.height} px tall (bar ${this._topBar.height}, ` +
+                    `in bar ${inBar}, display ${tallest}); kept to the display`);
+            }
+            size.height = tallest;
         }
         // An even width: centred on the display to the pixel, as much room on either side.
         size.width = 2 * Math.round(size.width / 2);
@@ -2204,7 +2262,7 @@ export class Controller {
             }
             break;
         case 'add-task':
-            this._daemon.call('todo', 'Add', data.query);
+            this._addTask(data.query);
             this.expand('reminders');
             break;
         case 'add-event':

@@ -5,10 +5,14 @@
 // count, a ring and a hairline per reminder, and a last row to add one; a ticked one is struck, then goes.
 
 import Clutter from 'gi://Clutter';
+import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
+import Pango from 'gi://Pango';
 import St from 'gi://St';
 
-import {VERTICAL} from '../compat.js';
+import {VERTICAL, onUiScale} from '../compat.js';
+import * as Format from '../format.js';
+import {editableWhen, isLate, order, whenText} from '../reminderRules.js';
 import {iconButton, label, wrapLines} from '../widgets.js';
 import {Page} from './page.js';
 
@@ -18,9 +22,29 @@ const TICK_MS = 200;
 const LINGER_MS = 900;
 /** How long it takes to fade and fold away. */
 const LEAVE_MS = 260;
+/** Typing pauses this long before the line is read for its time. */
+const PARSE_MS = 150;
+/** How often a row's time is said again ("12m late") while the page is open. */
+const WHEN_MS = 30 * 1000;
 /** The strike drawn across the title, and a new reminder opening its row. */
 const STRIKE_MS = 180;
 const ARRIVE_MS = 220;
+
+/** The middle of a title's first line, in the title's own coordinates; null when it is one line (or not laid out). */
+function firstLineMiddle(title) {
+    try {
+        const layout = title.clutter_text.get_layout();
+        if (!layout || layout.get_line_count() < 2)
+            return null;
+        const [logical] = layout.get_line(0).get_extents();
+        return (logical.y + logical.height / 2) / Pango.SCALE;
+    } catch (e) {
+        return null;
+    }
+}
+
+/** A clock time, as GNOME's 12/24-hour setting writes it ("17:00", "5:00 PM"). */
+const clock = date => Format.timeOfDay(GLib.DateTime.new_from_unix_local(Math.floor(date.getTime() / 1000)));
 
 /** Calls `callback(hovered)` as the pointer comes onto `actor` or leaves it, as St's `hover` would, but
  * without the :hover restyle of all inside it (for rows with no :hover style). */
@@ -96,6 +120,10 @@ export const TasksPage = GObject.registerClass({
         this._gone = new Set();
         /** Each shown reminder's row by id, kept while the reminder is unchanged. */
         this._rows = new Map();
+        /** What isled read from the line being typed, `{title, due_ms}`, or null. */
+        this._parsed = null;
+        /** Counts parses, so a slow answer to older text cannot set the chip. */
+        this._parseSeq = 0;
 
         const column = new St.BoxLayout({...VERTICAL, x_expand: true, y_expand: true});
         column.add_child(this._buildHeader());
@@ -152,10 +180,17 @@ export const TasksPage = GObject.registerClass({
         this._entry = new St.Entry({style_class: 'isle-reminder-field', hint_text: 'New reminder', can_focus: true, x_expand: true});
         const content = new St.BoxLayout({style_class: 'isle-reminder-content', y_expand: true});
         content.add_child(this._entry);
+        // The time the line reads as, once it has one ("Tomorrow 17:00").
+        this._newWhen = label('', 'isle-reminder-when isle-reminder-new-when', {
+            y_align: Clutter.ActorAlign.START, visible: false,
+        });
+        content.add_child(this._newWhen);
         column.add_child(content);
         row.add_child(column);
 
         const text = this._entry.clutter_text;
+        // Typing pauses: read the line for a time, as the page and the assistant read it.
+        text.connect('text-changed', () => this._parseSoon());
         // Enter adds it and leaves the field ready for the next.
         text.connect('activate', () => this._add());
         // A click takes the keyboard (see the controller's `_onFieldPress`); Esc or a click outside gives it back.
@@ -183,19 +218,83 @@ export const TasksPage = GObject.registerClass({
         });
     }
 
-    /** Sends the typed title to isled. */
+    /** What isled reads `line` as: `{title, due_ms, line}`, or null when it cannot be asked. */
+    async _parse(line) {
+        if (!line)
+            return null;
+        const answer = await this.daemon.call('todo', 'Parse', line);
+        if (!answer)
+            return null;
+        try {
+            return {...JSON.parse(answer), line};
+        } catch (e) {
+            console.warn(`Isle: could not read that reminder: ${e.message}`);
+            return null;
+        }
+    }
+
+    /** Reads the line once typing pauses, and shows the time it found beside it. */
+    _parseSoon() {
+        const line = this._entry.text.trim();
+        const seq = ++this._parseSeq;
+        this.later('parse', PARSE_MS, async () => {
+            const parsed = await this._parse(line);
+            // A newer keystroke, or Isle stopping, since this was asked.
+            if (seq !== this._parseSeq || this._destroyed)
+                return;
+            this._setParsed(parsed);
+        });
+    }
+
+    /** Keeps what the line read as, and says its time. */
+    _setParsed(parsed) {
+        this._parsed = parsed;
+        const due = parsed?.due_ms > 0 ? parsed.due_ms : 0;
+        this._newWhen.text = due ? whenText({due_ms: due}, Date.now(), clock) : '';
+        this._newWhen.visible = Boolean(due);
+    }
+
+    /** Sends the typed line to isled: its title and the time it was read as. */
     async _add() {
         const text = this._entry.text.trim();
         if (!text)
             return;
-        this._entry.text = '';
-        await this.daemon.call('todo', 'Add', text);
-        this._revealNew();
+        // Enter can come before the pause that reads the line: read it now rather than lose its time.
+        const parsed = this._parsed?.line === text ? this._parsed : await this._parse(text);
+        // The title without the time words, as isled read them; the raw text when it could not be asked.
+        const title = parsed?.title?.trim() || text;
+        const due = parsed?.due_ms > 0 ? parsed.due_ms : 0;
+        const id = await this.daemon.call('todo', 'Add', title, due);
+        // isled could not be asked: the words stay where they are, and its own alert says why.
+        if (!Number.isInteger(id))
+            return;
+        // Only if nothing was typed meanwhile.
+        if (this._entry.text.trim() === text) {
+            this._entry.text = '';
+            this._setParsed(null);
+        }
+        this._revealTask(id);
+    }
+
+    /** Scrolls to the row just added, wherever the order put it. */
+    _revealTask(id) {
+        this.later('reveal-task', 80, () => {
+            const row = Number.isInteger(id) ? this._rows.get(id) : null;
+            if (!row) {
+                this._revealNew();
+                return;
+            }
+            const adjustment = this._scroll.vadjustment;
+            const top = row.y - 4;
+            adjustment.ease(Math.max(0, Math.min(top, adjustment.upper - adjustment.page_size)),
+                {duration: 200, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
+        });
     }
 
     /** Clears the field and gives the keyboard back if it had it. */
     _stopAdding() {
         this._entry.text = '';
+        this._setParsed(null);
         if (this._entry.clutter_text.has_key_focus())
             this.emit('request-keyboard', false);
     }
@@ -210,7 +309,8 @@ export const TasksPage = GObject.registerClass({
         const open = tasks.filter(task => !task.done);
         // Forgotten once isled has them done, or gone for another reason.
         this._gone = new Set(open.filter(task => this._gone.has(task.id)).map(task => task.id));
-        const shown = open.filter(task => !this._gone.has(task.id)).sort((a, b) => a.id - b.id);
+        // Late first, then the soonest, then the untimed as they were added.
+        const shown = order(open.filter(task => !this._gone.has(task.id)));
         this._count.text = String(shown.length);
 
         // The field stays in place, with what is typed in it and its focus, while the rows above it are
@@ -225,6 +325,8 @@ export const TasksPage = GObject.registerClass({
         if (focus && going.some(([, row]) => row.contains(focus)))
             global.stage.set_key_focus(null);
         for (const [id, row] of going) {
+            // Before it goes: a destroyed row's `notify::mapped` still reaches `lit`.
+            row._gone = true;
             row.destroy();
             this._rows.delete(id);
         }
@@ -253,7 +355,7 @@ export const TasksPage = GObject.registerClass({
         }
         this._known = new Set(shown.map(task => task.id));
         this._empty.visible = shown.length === 0;
-        this._empty.text = tasks.length > shown.length ? 'All done' : 'No reminders';
+        this._empty.text = tasks.length > shown.length ? 'All done' : 'No reminders · type above, or press Super+K';
     }
 
     /** Opens `row` from nothing to its height, fading in, while the rows below make room. */
@@ -320,11 +422,26 @@ export const TasksPage = GObject.registerClass({
         titleBox.add_child(strike);
         content.add_child(titleBox);
 
-        // ▶ starts a focus session on it; × deletes it. Both appear while the pointer is on the row.
+        // Its time, at the right ("17:00", "Tomorrow 09:30", "12m late"); nothing for a plain to-do.
+        const when = label(whenText(task, Date.now(), clock), 'isle-reminder-when', {
+            y_align: Clutter.ActorAlign.START, visible: false, reactive: Boolean(task.due_ms),
+        });
+        when.visible = Boolean(when.text);
+        if (isLate(task))
+            when.add_style_class_name('late');
+        // Click the time to change it, as the title is clicked to rename it.
+        when.connect('button-release-event', () => {
+            this._startWhen(when, task);
+            return Clutter.EVENT_STOP;
+        });
+        row._when = when;
+        row._task = task;
+
+        // ▶ starts a focus session on it; × deletes it. Both take the time's place while the row is lit: under
+        // the pointer, or with the keyboard in it.
         const focus = iconButton('isle-play-symbolic', 'isle-button-flat isle-reminder-focus',
             () => this.emit('focus-task', String(task.id), task.title),
             {size: 9, accessibleName: 'Focus on this reminder'});
-        focus.opacity = 0;
         // Once: a double click would ask isled to delete what is already gone.
         let removing = false;
         const remove = iconButton('isle-close-symbolic', 'isle-button-flat isle-reminder-remove', () => {
@@ -333,19 +450,91 @@ export const TasksPage = GObject.registerClass({
                 this.daemon.call('todo', 'Remove', task.id);
             }
         }, {size: 9, accessibleName: 'Delete reminder'});
-        remove.opacity = 0;
-        onHover(row, hovered => {
-            focus.ease({opacity: hovered ? 255 : 0, duration: 120});
-            remove.ease({opacity: hovered ? 255 : 0, duration: 120});
+        // The row is the control: its buttons are a pointer's shortcut, and the keyboard has its own keys.
+        focus.can_focus = remove.can_focus = false;
+        const actions = new St.BoxLayout({style_class: 'isle-reminder-actions', x_align: Clutter.ActorAlign.END,
+            y_align: Clutter.ActorAlign.CENTER, opacity: 0, reactive: false});
+        actions.add_child(focus);
+        actions.add_child(remove);
+        // One slot at the right: the time, and the buttons over it, so neither is laid out beside the other.
+        when.x_align = Clutter.ActorAlign.END;
+        const slot = new St.Widget({layout_manager: new Clutter.BinLayout(), x_expand: false,
+            y_align: Clutter.ActorAlign.START});
+        slot.add_child(when);
+        slot.add_child(actions);
+        content.add_child(slot);
+
+        /** Lit: the pointer on it, or the keyboard in it. The buttons only take clicks while they show. */
+        const lit = on => {
+            // Going away: `notify::mapped` fires as the row is destroyed, and its label is gone by then.
+            if (row._gone)
+                return;
+            actions.reactive = on;
+            actions.ease({opacity: on ? 255 : 0, duration: 120});
+            when.ease({opacity: on ? 0 : 255, duration: 120});
+        };
+        onHover(row, hovered => lit(hovered || row._focused));
+        row.can_focus = true;
+        row.connect('key-focus-in', () => {
+            row._focused = true;
+            lit(true);
         });
-        content.add_child(focus);
-        content.add_child(remove);
+        row.connect('key-focus-out', () => {
+            row._focused = false;
+            lit(false);
+        });
+        row.connect('key-press-event', (_row, event) => this._rowKey(event, task, row, {check, titleBox, title}));
+        // A click on the row itself (not on its title or its buttons) gives it the keyboard, so ↑/↓ work.
+        row.connect('button-release-event', (_row, event) => {
+            if (event.get_button() === Clutter.BUTTON_PRIMARY && !row._focused) {
+                this.emit('request-keyboard', true);
+                row.grab_key_focus();
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
         column.add_child(content);
         column.add_child(new St.Widget({style_class: 'isle-reminder-line'}));
         row.add_child(column);
 
         check.connect('clicked', () => this._tick(task, {row, check, dot, title, strike}));
         return row;
+    }
+
+    /** The keyboard in a row: ↑/↓ between them, Space ticks, Enter renames, Delete removes. */
+    _rowKey(event, task, row, {check, titleBox, title}) {
+        const key = event.get_key_symbol();
+        if (key === Clutter.KEY_Up || key === Clutter.KEY_Down) {
+            this._focusRow(row, key === Clutter.KEY_Up ? -1 : 1);
+            return Clutter.EVENT_STOP;
+        }
+        if (key === Clutter.KEY_space) {
+            check.emit('clicked');
+            return Clutter.EVENT_STOP;
+        }
+        if (key === Clutter.KEY_Return || key === Clutter.KEY_KP_Enter) {
+            if (this._renaming === null && !this._leaving.has(task.id))
+                this._startRenaming(titleBox, title, task);
+            return Clutter.EVENT_STOP;
+        }
+        if (key === Clutter.KEY_Delete || key === Clutter.KEY_BackSpace) {
+            this.daemon.call('todo', 'Remove', task.id);
+            return Clutter.EVENT_STOP;
+        }
+        return Clutter.EVENT_PROPAGATE;
+    }
+
+    /** Moves the keyboard `delta` rows on; past the last one, into the new-reminder field. */
+    _focusRow(row, delta) {
+        const rows = this._list.get_children().filter(child => child instanceof ReminderRow);
+        const next = rows[rows.indexOf(row) + delta];
+        if (!next && delta > 0) {
+            this._focusNew();
+            return;
+        }
+        if (!next)
+            return;
+        this.emit('request-keyboard', true);
+        next.grab_key_focus();
     }
 
     // Ticks a reminder: the ring turns orange with a dot in it, the title is struck through, it lingers
@@ -374,6 +563,12 @@ export const TasksPage = GObject.registerClass({
             strike.remove_transition('scale-x');
             strike.ease({scale_x: 0, duration: STRIKE_MS, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
             return;
+        }
+        // A wrapped title: the strike goes on its first line, not between them.
+        const middle = firstLineMiddle(title);
+        if (middle !== null) {
+            strike.y_align = Clutter.ActorAlign.START;
+            strike.margin_top = Math.max(0, Math.round(middle - 1));
         }
         // The text's own width, as laid out (cut short with … when long); measured before restyling.
         // The strike's box, not the title's: the title is off it while being renamed.
@@ -411,6 +606,67 @@ export const TasksPage = GObject.registerClass({
                 },
             });
         });
+    }
+
+    /** Clicking a row's time: type a new one ("tomorrow 9am", "in 2h"), Enter keeps it, Esc cancels. */
+    _startWhen(when, task) {
+        if (this._renaming !== null || this._leaving.has(task.id) || !task.due_ms)
+            return;
+        const entry = new St.Entry({style_class: 'isle-reminder-field isle-reminder-when-field',
+            text: editableWhen(task, Date.now(), clock), can_focus: true, x_expand: false});
+        onUiScale(entry, scale => (entry.width = 150 * scale));
+        when.get_parent().replace_child(when, entry);
+        // The list holds still meanwhile, as it does for a rename.
+        this._renaming = task.id;
+        this._rows.get(task.id)._key = null;
+        this.emit('request-keyboard', true);
+        entry.grab_key_focus();
+        entry.clutter_text.set_selection(0, -1);
+
+        let finished = false;
+        const finish = save => {
+            if (finished)
+                return;
+            finished = true;
+            const text = entry.text.trim();
+            if (this._renaming === task.id)
+                this._renaming = null;
+            if (save)
+                this._setWhen(task, text);
+            // After this event: the entry must outlive the focus change that brought it here.
+            this.later('renamed', 0, () => {
+                this._update();
+                this._releaseKeyboard();
+            }, {keep: true});
+        };
+        entry.clutter_text.connect('activate', () => finish(true));
+        entry.clutter_text.connect('key-focus-out', () => finish(true));
+        entry.clutter_text.connect('key-press-event', (_text, event) => {
+            if (event.get_key_symbol() !== Clutter.KEY_Escape)
+                return Clutter.EVENT_PROPAGATE;
+            finish(false);
+            return Clutter.EVENT_STOP;
+        });
+    }
+
+    /** Sets a reminder's time from typed words; empty clears it, unreadable words leave it as it was. */
+    async _setWhen(task, text) {
+        if (!text) {
+            this.daemon.call('todo', 'SetDue', task.id, 0);
+            return;
+        }
+        // Read with the title in front, so the words keep the parser's "a time already past means tomorrow".
+        const answer = await this.daemon.call('todo', 'Parse', `${task.title} ${text}`);
+        if (!answer)
+            return;
+        let parsed;
+        try {
+            parsed = JSON.parse(answer);
+        } catch (e) {
+            return;
+        }
+        if (parsed?.due_ms > 0)
+            this.daemon.call('todo', 'SetDue', task.id, parsed.due_ms);
     }
 
     // Renaming
@@ -461,8 +717,30 @@ export const TasksPage = GObject.registerClass({
             this.emit('request-keyboard', false);
     }
 
+    /** The page opened: its rows' times are said again as they age ("12m late"). */
+    onActivate() {
+        this._tickWhen();
+    }
+
+    /** Says each row's time again, and asks for another look while the page stays open. */
+    _tickWhen() {
+        const now = Date.now();
+        for (const row of this._rows.values()) {
+            const text = whenText(row._task, now, clock);
+            if (row._when.text !== text)
+                row._when.text = text;
+            row._when.visible = Boolean(text);
+            if (isLate(row._task, now))
+                row._when.add_style_class_name('late');
+            else
+                row._when.remove_style_class_name('late');
+        }
+        this.later('when', WHEN_MS, () => this._tickWhen());
+    }
+
     /** Ends whatever was under way, so the list is settled next time. */
     onDeactivate() {
+        this.cancel('when');
         this._stopAdding();
         // Nothing in the middle of anything: the list stays as it is, with no rebuild as the page goes.
         if (this._renaming === null && this._leaving.size === 0)

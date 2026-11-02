@@ -17,7 +17,6 @@ mod login_env;
 mod media;
 mod meeting;
 mod pomodoro;
-mod reminders;
 mod shelf;
 mod store;
 mod system;
@@ -40,7 +39,6 @@ use crate::calendar::CalendarService;
 use crate::clipboard::ClipboardService;
 use crate::media::MediaService;
 use crate::pomodoro::PomodoroService;
-use crate::reminders::RemindersService;
 use crate::shelf::ShelfService;
 use crate::system::SystemService;
 use crate::todo::TodoService;
@@ -157,7 +155,6 @@ async fn run() -> anyhow::Result<()> {
     server.at(OBJECT_PATH, ShelfService::load()).await?;
     server.at(OBJECT_PATH, ClipboardService::load()).await?;
     server.at(OBJECT_PATH, CalendarService::load()).await?;
-    server.at(OBJECT_PATH, RemindersService::load()).await?;
     server.at(OBJECT_PATH, SystemService::default()).await?;
     server.at(OBJECT_PATH, AppUsageService::load()).await?;
     server.at(OBJECT_PATH, assistant).await?;
@@ -182,11 +179,7 @@ async fn run() -> anyhow::Result<()> {
     ));
     let calendar = server.interface::<_, CalendarService>(OBJECT_PATH).await?;
     tokio::spawn(calendar::send_waiting(calendar.clone(), session.clone()));
-    let own_data = assistant::Sources {
-        todo: todo.clone(),
-        calendar,
-        reminders: server.interface::<_, RemindersService>(OBJECT_PATH).await?,
-    };
+    let own_data = assistant::Sources { todo: todo.clone(), calendar };
 
     let session_for_media = session.clone();
     tokio::spawn(async move {

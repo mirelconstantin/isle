@@ -72,6 +72,9 @@ This fork ([mirelconstantin/isle](https://github.com/mirelconstantin/isle)) buil
 - **Focus figures & deep work stats**:
   The Focus tab tracks today's completed focus sessions and total focused time, alongside a 7-day mini bar graph. Reminders feature a ▶ button on hover to instantly start a focus session on that task with "Focusing on [task]" and a single-click **Done** button. The page also previews the next calendar meeting with a direct **Join** button and applies a quiet ambient tint to the island during work sessions.
 
+- **Timed reminders**:
+  A reminder can carry a time, read from the line you type ("Call the bank tomorrow 17:00", "in 10 min", "on 3 Nov 09:00"). The list is ordered late first and each row says its time ("Tomorrow 09:30", "12m late"); click it to change it. A quiet heads-up comes before (Settings → Alerts, ten minutes by default), the closed island counts it down, and the alert at the hour offers **Snooze 10 min** and **Done**. The list also takes the keyboard: ↑↓, Space, Enter, Delete.
+
 - **Header Join pill**:
   A blue **Join · HH:MM** pill appears directly in the open island header 10 minutes before any calendar event with a video meeting link (Google Meet, Zoom, Microsoft Teams, Webex) and remains throughout the call.
 
@@ -110,7 +113,7 @@ This fork ([mirelconstantin/isle](https://github.com/mirelconstantin/isle)) buil
 <tr>
 <td width="50%" valign="top">
 <img src="docs/images/reminders.png" alt="Reminders page: four reminders, one of them long" width="100%"><br>
-<b>Reminders</b>, a plain list: add, rename in place, tick one off and it is struck through, then goes. A long one wraps over as many lines as it needs.
+<b>Reminders</b>, with a time when they need one: type "Call the bank tomorrow 17:00" and the island reads it — the time at the right of the row, a quiet heads-up before, the countdown in the closed island, and Snooze or Done at the hour. A plain to-do still needs nothing but its words. Tick one off and it is struck through, then goes.
 </td>
 <td width="50%" valign="top">
 <img src="docs/images/clipboard.png" alt="Clipboard history" width="100%"><br>
@@ -341,7 +344,8 @@ Click the gear right of the clock in the open island (or Isle's gear in the
 - **Alerts:** apps' notifications in the island (or GNOME's own banners
   instead); volume and brightness; charging, network, Bluetooth and Caps
   Lock, each on its own; new songs, sounds; lyrics online;
-  a reminder before calendar events, and how many minutes before.
+  a reminder before calendar events, and how many minutes before; a quiet heads-up before a reminder, and
+  how many minutes before (0 for only at its hour).
   Alerts other than a low battery are not shown while Do Not Disturb is on.
 - **Calls:** show calls in the island, and the live preview of the call.
 - **Clipboard:** turn the history on or off, clear it, what Super+V opens (the
