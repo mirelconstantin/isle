@@ -754,7 +754,7 @@ export class Controller {
         this._monitor = this._wantedMonitor();
         // On a black bar the island grows out of it, its shoulders below the
         // bar; on any other it hangs from the top of the screen like a notch.
-        this._island.topInset = this._blendsIn ? this._topBar.height : 0;
+        this._island.topInset = this._blendsIn ? this._barHeight : 0;
         this._island.monitor = this._monitor;
         // Without a top bar (another display) the open island's header is its own. In the bar, it keeps to the
         // closed island's band, above the space below it.
@@ -817,6 +817,21 @@ export class Controller {
     _syncMonitor() {
         if (this._monitor && this._presentation === 'compact' && this._wantedMonitor() !== this._monitor)
             this._updateGeometry();
+    }
+
+    /**
+     * The top bar's height in stage pixels, or the height a bar has when the bar reports one no bar has (a
+     * theme or another extension gone wrong): an island sized from that would be as tall as the screen.
+     */
+    get _barHeight() {
+        const height = this._topBar.height;
+        if (Number.isFinite(height) && height > 0 && height <= px(120))
+            return height;
+        if (!this._barWarned && this._topBar.isTopPanel) {
+            this._barWarned = true;
+            console.warn(`Isle: the top bar says it is ${height} px tall; using a bar's height instead`);
+        }
+        return this._topBar.isTopPanel ? px(32) : 0;
     }
 
     /** Whether the island is on the main display. */
@@ -1100,14 +1115,14 @@ export class Controller {
         // A display without the top bar: the island hangs from its top edge. Sizes are in stage pixels; the
         // CSS ones (padding) are divided by `scale` again, as St multiplies them.
         const scale = uiScale();
-        const top = this._onBar ? this._topBar.height : 0;
+        const top = this._onBar ? this._barHeight : 0;
         // The closed island keeps the size it has in the bar on a display without one: moving the island
         // there must not shrink it (see the compact case below). A panel another extension moved to the
         // bottom has no bar height to take that size from, so it hangs at the notch's.
-        const inBar = this._settings.get_boolean('island-in-top-bar') && this._topBar.height > 0;
+        const inBar = this._settings.get_boolean('island-in-top-bar') && this._barHeight > 0;
         // Inside the bar it leaves the bar's last few pixels free (Settings), open as well as closed. Its size
         // comes from the bar, not from `top`: off the bar the island keeps it and hangs from the screen.
-        const band = this._topBar.height - (inBar ? this._topBar.gap : 0);
+        const band = this._barHeight - (inBar ? this._topBar.gap : 0);
         // Before measuring it: inside the bar it is smaller.
         this._compact.inBar = inBar;
 
@@ -1159,6 +1174,17 @@ export class Controller {
             };
             view = this._compact;
             view.style = inBar ? null : `padding-top: ${top / scale}px;`;
+        }
+        // Nothing Isle draws is taller than the display it is on; one that says so is wrong, and saying it
+        // once puts the reason in the log.
+        const tallest = (this._monitor?.height ?? px(4000)) - 1;
+        if (!Number.isFinite(size.height) || size.height > tallest) {
+            if (!this._sizeWarned) {
+                this._sizeWarned = true;
+                console.warn(`Isle: ${presentation} would be ${size.height} px tall (bar ${this._topBar.height}, ` +
+                    `in bar ${inBar}, display ${tallest}); kept to the display`);
+            }
+            size.height = tallest;
         }
         // An even width: centred on the display to the pixel, as much room on either side.
         size.width = 2 * Math.round(size.width / 2);

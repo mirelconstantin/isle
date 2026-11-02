@@ -325,6 +325,8 @@ export const TasksPage = GObject.registerClass({
         if (focus && going.some(([, row]) => row.contains(focus)))
             global.stage.set_key_focus(null);
         for (const [id, row] of going) {
+            // Before it goes: a destroyed row's `notify::mapped` still reaches `lit`.
+            row._gone = true;
             row.destroy();
             this._rows.delete(id);
         }
@@ -464,6 +466,9 @@ export const TasksPage = GObject.registerClass({
 
         /** Lit: the pointer on it, or the keyboard in it. The buttons only take clicks while they show. */
         const lit = on => {
+            // Going away: `notify::mapped` fires as the row is destroyed, and its label is gone by then.
+            if (row._gone)
+                return;
             actions.reactive = on;
             actions.ease({opacity: on ? 255 : 0, duration: 120});
             when.ease({opacity: on ? 0 : 255, duration: 120});

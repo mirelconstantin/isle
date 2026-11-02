@@ -48,8 +48,8 @@ const INTERFACES = {
     },
     todo: {
         xml: node('Todo1', `
-            <method name="Add"><arg name="text" type="s" direction="in"/><arg name="due_ms" type="t" direction="in"/><arg type="t" direction="out"/></method>
-            <method name="SetDue"><arg name="id" type="t" direction="in"/><arg name="due_ms" type="t" direction="in"/></method>
+            <method name="Add"><arg name="text" type="s" direction="in"/><arg name="due_ms" type="x" direction="in"/><arg type="t" direction="out"/></method>
+            <method name="SetDue"><arg name="id" type="t" direction="in"/><arg name="due_ms" type="x" direction="in"/></method>
             <method name="SetAlerted"><arg name="id" type="t" direction="in"/><arg name="alerted" type="b" direction="in"/></method>
             <method name="Parse"><arg name="text" type="s" direction="in"/><arg type="s" direction="out"/></method>
             <method name="SetDone"><arg name="id" type="t" direction="in"/><arg name="done" type="b" direction="in"/></method>
