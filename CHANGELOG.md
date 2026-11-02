@@ -18,13 +18,29 @@ All notable changes to Isle are listed here. The format follows
   default), with a small "Sharing" or "Recording" pill on it; off, the preview gives way to the hint as before.
 - Reminders can carry a time, and the line says it: "Call the bank tomorrow 17:00" is read as a title and a
   time (`today`, `tomorrow`, `tonight`, a weekday, `on 3 Nov`, `in 10 min`, or just `17:00`), and the new row
-  shows what it read. The list is ordered late first, then the soonest, then the untimed; each row says its
-  time at the right ("Tomorrow 09:30", "12m late" in the page's orange) and clicking it changes it.
+  shows what it read. The list is ordered late first, then the soonest, then the untimed under a quiet
+  "No time"; each row says its time at the right ("Tomorrow 09:30", "12m late" in the page's orange). Clicking
+  it — or **Add time** on a plain to-do, or the new row's chip — opens a time sheet: today and the week as day
+  chips, the time between − and + with **In 1 hour**, **Tonight** and **Tomorrow 09:00** a click away, **Type**
+  for the line's words ("on 3 Nov"), **Clear** and **Done**.
+- Reminders can come back: "every monday 9:00", "every day", "every weekday", or `setiap senin`/`setiap hari`.
+  The sheet offers **Once · Daily · Weekdays · Every Mon** too, the row says how often ("· Every Mon"), and
+  ticking one on moves it to its next occurrence instead of finishing it.
+- The parser reads Indonesian day words as well as English: `hari ini`, `besok`, `lusa`, `malam`, and
+  `senin`…`minggu`; `in 10 min` is found anywhere in the line, and a delay past the calendar's range is read
+  as words rather than a crash.
+- Snooze has its own length (Settings → Alerts: 1–120 minutes, 10 by default), and Done on a reminder's alert
+  offers **Undo** for a moment.
+- A reminder wears its own check, as the Reminders tab does, instead of the notifications bell — in the alert,
+  the heads-up, and the closed island's countdown.
+- The assistant can move a reminder it already made ("move my 5pm to 6pm", `reschedule_reminder`), instead of
+  cancelling it and adding another.
 - A quiet heads-up before a reminder (Settings → Alerts: 0–60 minutes, ten by default), its time left counting
-  down in the closed island, and the reminder itself at its hour with **Snooze 10 min** and **Done**. The
+  down in the closed island, and the reminder itself at its hour with **Snooze** and **Done**. The
   assistant's reminders are these rows now: one list, not two.
 - The Reminders page takes the keyboard: ↑↓ between rows (and past the last into the new one), Space ticks,
-  Enter renames, Delete removes, and a focused row shows ▶ and × as the pointer does.
+  Enter renames, T sets the time, Delete removes, and a focused row shows ▶ and × as the pointer does. The
+  time sheet has its own: ←→ a day, ↑↓ a quarter hour, Enter keeps it, Delete clears it, Esc cancels.
 - A Devices page listing the devices connected now — Bluetooth, or a mouse or keyboard on its own
   receiver (Logitech's HID++, whose battery the desktop's Power settings show too) — each with the
   battery it reports ("No battery" for one that reports none, as many phones do).
@@ -49,6 +65,14 @@ All notable changes to Isle are listed here. The format follows
 
 ### Fixed
 
+- A reminder's time can be clicked while the pointer is on its row: ▶ and × now sit beside it instead of
+  covering it, and a plain to-do can be given a time at all — its editor had no way to be reached. A double
+  Enter no longer adds the same reminder twice, and a row no longer rebuilds when its alert is marked shown.
+- Snoozing a reminder no longer marks the new time as already shown: the mark now lands only when the alert is
+  shown, so a snoozed reminder still comes back.
+- "in 10 min" is found wherever it stands in the line ("Meet in the office in 10 min"), only real units count
+  ("in 10 months" is not ten minutes), and an absurd delay no longer overflows.
+- A reminder's heads-up says the minutes actually left, not the setting, when a late wake leaves fewer.
 - A call is named after its own service again: "Meet with Ana - Zoom" is a Zoom call, not a Google Meet one
   (the services are tried from the most specific, and "meet" only when nothing else is named). The list now
   covers the services people call on — WhatsApp, Telegram, Discord, Zoom, Teams, Jitsi, Slack, Messenger,

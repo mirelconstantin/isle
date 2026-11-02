@@ -138,6 +138,7 @@ mod tests {
             done,
             done_at_ms: None,
             due_ms: None,
+            repeat: None,
             alerted: false,
         }
     }

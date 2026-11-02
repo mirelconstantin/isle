@@ -14,6 +14,8 @@ import {hasOwnIcon} from './widgets.js';
 const OSD_DURATION = 1500;
 const STATUS_DURATION = 2600;
 const REMINDER_DURATION = 8000;
+/** Long enough to notice a mistap and undo it. */
+const REMINDER_DONE_DURATION = 5000;
 /** The quiet heads-up before a reminder: read, then gone. */
 const SOON_DURATION = 6000;
 /** As long as GNOME's own banner; a passing one (a screenshot taken) less. The pointer on it holds it. */
@@ -385,12 +387,14 @@ export function usage(provider, window, percent, resetsAt, critical) {
 /** A clock time for an alert's subtitle ("17:00", "5:00 PM"). */
 const clockOf = ms => Format.timeOfDay(GLib.DateTime.new_from_unix_local(Math.floor(ms / 1000)));
 
-/** A reminder at its hour ("Call the bank", "17:00 · Reminder"): sticky, with its chime, Done and Snooze. */
-export function reminder({id, text, due_ms}, onShown, {onDone, onSnooze} = {}) {
+/** A reminder at its hour ("Call the bank", "17:00 · Reminder"): sticky, with its chime, Done and Snooze.
+ * `snooze` is how long Snooze puts it off, in minutes (Settings → Alerts). */
+export function reminder({id, text, due_ms}, onShown, {onDone, onSnooze, snooze = 10} = {}) {
     return {
         // Its own key, so reminders due together queue instead of replacing each other.
         key: `reminder:${id}`,
-        icon: 'isle-bell',
+        // The Reminders page's own check, as its tab: the bell is notifications'.
+        icon: 'isle-tasks',
         motion: 'ring',
         title: text,
         // Its words are the point: two lines, as a meeting's title.
@@ -402,18 +406,31 @@ export function reminder({id, text, due_ms}, onShown, {onDone, onSnooze} = {}) {
         sticky: true,
         onShown,
         actions: [
-            ...(onSnooze ? [{label: 'Snooze 10 min', callback: onSnooze}] : []),
+            ...(onSnooze ? [{label: `Snooze ${snooze} min`, callback: onSnooze}] : []),
             ...(onDone ? [{label: 'Done', callback: onDone, primary: true}] : []),
         ],
     };
 }
 
+/** A reminder ticked off, for a moment: Undo puts it back (and, for one that comes back, the time it had). */
+export function reminderDone({id, text}, onUndo) {
+    return {
+        key: `reminder-done:${id}`,
+        icon: 'isle-check-symbolic',
+        title: text,
+        subtitle: 'Done',
+        tone: 'good',
+        duration: REMINDER_DONE_DURATION,
+        actions: onUndo ? [{label: 'Undo', callback: onUndo}] : [],
+    };
+}
+
 /** The quiet heads-up before a reminder: no chime, no button, gone by itself. */
-export function reminderSoon({id, text, due_ms}, minutes) {
+export function reminderSoon({id, text, due_ms, minutes}) {
     return {
         // Its own key: the heads-up and the hour are two different alerts.
         key: `reminder-soon:${id}`,
-        icon: 'isle-bell',
+        icon: 'isle-tasks',
         motion: 'ring',
         title: `${text} in ${minutes} min`,
         titleLines: 2,

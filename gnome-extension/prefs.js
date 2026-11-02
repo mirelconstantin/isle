@@ -393,6 +393,8 @@ export default class IslePreferences extends ExtensionPreferences {
         alerts.add(eventMinutes);
         alerts.add(spinRow(settings, 'reminder-alert-minutes', 'Minutes before a reminder',
             'A quiet heads-up; 0 shows it only when it is due', 0, 60));
+        alerts.add(spinRow(settings, 'reminder-snooze-minutes', 'Snooze a reminder for',
+            'The minutes its Snooze adds', 1, 120));
         alerts.add(switchRow(settings, 'track-peek', 'New song', 'Briefly show the song when the track changes'));
         alerts.add(switchRow(settings, 'lyrics-online', 'Lyrics', 'Look up the playing song’s lyrics on LRCLIB'));
         alerts.add(switchRow(settings, 'chimes', 'Sounds',

@@ -775,10 +775,12 @@ impl Session {
              - add_task {{text}}: a to-do; done_task {{id}} ticks one off, remove_task {{id}} deletes it\n\
              - add_event {{date: YYYY-MM-DD, text}}: a calendar event; put its time in the text, e.g. \"Dinner 8:00 pm\"\n\
              - remind {{when, text}}: a reminder; when is when it is due, as words (\"in 10 minutes\", \
-             \"tomorrow 9am\", \"monday 17:00\", \"on 3 Nov 09:00\"); cancel_reminder {{id}} cancels one\n\
+             \"tomorrow 9am\", \"monday 17:00\", \"on 3 Nov 09:00\", \"every monday 9am\"); cancel_reminder {{id}} \
+             cancels one, reschedule_reminder {{id, when}} moves one it already has (\"move my 5pm to 6pm\")\n\
              - remove_event {{id}}: deletes a calendar event\n\
-             The ids are the [#n] in what Isle knows. To change a to-do, event or reminder, remove it and add the \
-             new one; never leave the old one behind.\n\
+             The ids are the [#n] in what Isle knows. To change a reminder's time, use reschedule_reminder; any \
+             other change to a to-do, event or reminder means removing it and adding the new one, never leaving \
+             the old one behind.\n\
              - volume {{level: 0-100}} or {{command: up | down | mute | unmute}}: the sound\n\
              - wifi {{on}}, bluetooth {{on}}, dnd {{on}}: turn Wi-Fi, Bluetooth or Do Not Disturb on or off\n\
              - notifications: {notifications}\n\

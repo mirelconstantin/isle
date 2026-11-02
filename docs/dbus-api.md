@@ -76,12 +76,13 @@ if the player then rejects the command, isled only logs it.
 
 | Member | Signature | |
 |---|---|---|
-| `Add(s text, t due_ms) → t id` | | Adds a task due at `due_ms` (milliseconds since the epoch), or with no time for `0`; a blank title is refused, and nothing more than a year ahead. |
+| `Add(s text, t due_ms, s repeat) → t id` | | Adds a task due at `due_ms` (milliseconds since the epoch), or with no time for `0`, that comes back as `repeat` says (`day`, `weekday`, `mon`…`sun`; `""` for one that doesn't); a blank title is refused, and nothing more than a year ahead. |
 | `SetDue(t id, t due_ms)` | | Changes when a task is due (`0` clears it), as a snooze or a changed time does; it may be shown again afterwards. |
+| `SetRepeat(t id, s repeat)` | | Sets how a task comes back once it is done, as `Add`'s `repeat` (`""` stops it). |
 | `SetAlerted(t id, b alerted)` | | Notes that its due alert was shown, so it is not shown again after a restart. |
-| `Parse(s text) → s` | | How a reminder line is read, without adding it: `{title, due_ms}` (`due_ms` 0 when it has no time). The time of day comes from `Calendar1.Parse`; on top of it, `today`, `tomorrow`, `tonight`, `monday`…`sunday`, `on 3 Nov` and `in 10 min`/`in 2h` are read. Fails (InvalidArgs) when no title is left. |
-| `SetDone(t id, b done)`, `Rename(t id, s title)`, `Remove(t id)`, `ClearDone()` | | Finished tasks are cleared at midnight. |
-| `Items` | `s` | `[{id, title, done, done_at_ms, due_ms, alerted}]`; `done_at_ms` is when the task was ticked off, or null; `due_ms` is when it is due, or null; `alerted` is whether its due alert was shown. |
+| `Parse(s text) → s` | | How a reminder line is read, without adding it: `{title, due_ms, repeat}` (`due_ms` 0 when it has no time, `repeat` `""` when it doesn't come back). The time of day comes from `Calendar1.Parse`; on top of it, `today`, `tomorrow`, `tonight`, `monday`…`sunday`, `on 3 Nov`, `in 10 min`/`in 2h`, their Indonesian words (`hari ini`, `besok`, `lusa`, `malam`, `senin`…`minggu`) and `every monday`/`every day`/`every weekday` (`setiap …`) are read. Fails (InvalidArgs) when no title is left. |
+| `SetDone(t id, b done)`, `Rename(t id, s title)`, `Remove(t id)`, `ClearDone()` | | Finished tasks are cleared at midnight. Ticking a repeating one never finishes it: it moves on to its next occurrence, counted from its due time (or from now, when that has passed). |
+| `Items` | `s` | `[{id, title, done, done_at_ms, due_ms, repeat, alerted}]`; `done_at_ms` is when the task was ticked off, or null; `due_ms` is when it is due, or null; `repeat` is how it comes back, or null; `alerted` is whether its due alert was shown. |
 
 A task with a `due_ms` is a reminder: the extension shows it as an alert when it is due, and the
 Reminders page lists it with its time.

@@ -1268,8 +1268,26 @@ const ACTIONS = {
         const parsed = await daemon.attempt('todo', 'Parse', when ? `${text} ${when}` : text);
         if (parsed.result === null)
             return failed(parsed.error ?? 'could not read that reminder');
-        const {title, due_ms} = JSON.parse(parsed.result);
-        return called(daemon, 'todo', 'Add', title, due_ms);
+        const {title, due_ms, repeat} = JSON.parse(parsed.result);
+        return called(daemon, 'todo', 'Add', title, due_ms, repeat ?? '');
+    },
+    // "move my 5pm to 6pm": the same parser as the page, on a reminder already on the list.
+    reschedule_reminder: async ({id, when}, {daemon}) => {
+        if (!Number.isInteger(id) || !when)
+            return failed('a reminder needs its new time');
+        const task = (daemon.state.tasks ?? []).find(each => each.id === id);
+        if (!task)
+            return failed('no reminder with that id');
+        const parsed = await daemon.attempt('todo', 'Parse', `${task.title} ${when}`);
+        if (parsed.result === null)
+            return failed(parsed.error ?? 'could not read that time');
+        const {due_ms, repeat} = JSON.parse(parsed.result);
+        if (!due_ms)
+            return failed('could not read that time');
+        await called(daemon, 'todo', 'SetDue', id, due_ms);
+        if ((repeat ?? '') !== (task.repeat ?? ''))
+            await called(daemon, 'todo', 'SetRepeat', id, repeat ?? '');
+        return due_ms;
     },
     volume: ({level, command}, {audio}) => {
         if (!audio.hasOutput)

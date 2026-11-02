@@ -105,6 +105,32 @@ export function icon(name) {
     return icons.get(name);
 }
 
+/** Calls `callback(hovered)` as the pointer comes onto `actor` or leaves it, as St's `hover` would, but
+ * without the :hover restyle of all inside it (for rows with no :hover style). */
+export function onHover(actor, callback) {
+    let hovered = false;
+    const set = value => {
+        if (value === hovered)
+            return;
+        hovered = value;
+        callback(value);
+    };
+    actor.connect('enter-event', () => {
+        set(true);
+        return Clutter.EVENT_PROPAGATE;
+    });
+    actor.connect('leave-event', (_actor, event) => {
+        const related = event.get_related();
+        if (!related || !actor.contains(related))
+            set(false);
+        return Clutter.EVENT_PROPAGATE;
+    });
+    actor.connect('notify::mapped', () => {
+        if (!actor.mapped)
+            set(false);
+    });
+}
+
 /** A label centred vertically in its row. */
 export function label(text, styleClass, props = {}) {
     return new St.Label({text, style_class: styleClass, y_align: Clutter.ActorAlign.CENTER, ...props});

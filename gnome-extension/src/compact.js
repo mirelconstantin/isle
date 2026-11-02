@@ -156,11 +156,11 @@ export const CompactView = GObject.registerClass({
         // The timer's time left, right of its ring, as large as the clock and level with it.
         this._timerTime = new St.Label({style_class: 'isle-compact-second-time', y_align: Clutter.ActorAlign.CENTER});
         this._timerTime.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
-        // A reminder close by, drawn as the timer is: its bell on the left and its countdown on the right when
-        // nothing else shows; beside an activity, the bell and the time together in the right slot.
-        this._reminderBell = new St.Icon({gicon: icon('isle-bell'), icon_size: 15, y_align: Clutter.ActorAlign.CENTER});
+        // A reminder close by, drawn as the timer is: its check on the left and its countdown on the right when
+        // nothing else shows; beside an activity, the check and the time together in the right slot.
+        this._reminderMark = new St.Icon({gicon: icon('isle-tasks'), icon_size: 15, y_align: Clutter.ActorAlign.CENTER});
         this._reminder = new St.BoxLayout({style_class: 'isle-compact-reminder', y_align: Clutter.ActorAlign.CENTER});
-        this._reminderIcon = new St.Icon({gicon: icon('isle-bell'), icon_size: 15, y_align: Clutter.ActorAlign.CENTER});
+        this._reminderIcon = new St.Icon({gicon: icon('isle-tasks'), icon_size: 15, y_align: Clutter.ActorAlign.CENTER});
         this._reminderTime = new St.Label({style_class: 'isle-compact-second-time', y_align: Clutter.ActorAlign.CENTER});
         this._reminderTime.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
         this._reminderPrimaryTime = new St.Label({style_class: 'isle-compact-second-time', y_align: Clutter.ActorAlign.CENTER});
@@ -179,7 +179,7 @@ export const CompactView = GObject.registerClass({
         this._inset = -1;
         // The sides are told not to expand, or their children's x_expand (which the alignment needs) would widen them.
         for (const actor of [this._timerIcon, this._ring, this._art, this._dot, this._recordingDot, this._phone, this._bars, this._micOff,
-            this._serviceDown, this._assistant, this._secondRing, this._secondArt, this._secondPhone, this._reminderBell])
+            this._serviceDown, this._assistant, this._secondRing, this._secondArt, this._secondPhone, this._reminderMark])
             actor.set({x_align: Clutter.ActorAlign.CENTER, x_expand: true});
         // From its square's start: the room `_fit` leaves after it keeps it off the island's end.
         for (const label of [this._timerTime, this._reminderPrimaryTime])
@@ -368,7 +368,7 @@ export const CompactView = GObject.registerClass({
         this._bars.maxHeight = size.bars;
         this._moon.icon_size = size.moon;
         this._phone.icon_size = this._micOff.icon_size = this._secondPhone.icon_size = this._timerIcon.icon_size = size.call;
-        this._reminderBell.icon_size = this._reminderIcon.icon_size = size.call;
+        this._reminderMark.icon_size = this._reminderIcon.icon_size = size.call;
         if (inBar)
             this.add_style_class_name('isle-compact-in-bar');
         else
@@ -427,12 +427,12 @@ export const CompactView = GObject.registerClass({
         // activity's sign, what goes with the first (the song's bars, the timer's time left).
         let right = second ? {music: this._secondArt, timer: this._secondRing, call: this._secondPhone}[second]
             : {music: this._bars, timer: anyDot ? null : this._timerTime}[primary] ?? null;
-        // A reminder inside its heads-up window, as the timer is drawn: alone, its bell takes the left and its
+        // A reminder inside its heads-up window, as the timer is drawn: alone, its check takes the left and its
         // countdown the right; beside an activity, both go in the right slot and give it up to anything else.
         const reminder = this._nextReminder();
         this._syncReminder(reminder);
         if (reminder && !left && !right) {
-            left = this._reminderBell;
+            left = this._reminderMark;
             right = this._reminderPrimaryTime;
         } else if (!right && reminder) {
             right = this._reminder;

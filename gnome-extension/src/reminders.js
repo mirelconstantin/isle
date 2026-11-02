@@ -82,11 +82,13 @@ export class ReminderWatcher {
             // Already shown and noted by isled: nothing more.
             if (item.alerted)
                 continue;
-            const reminder = {id: item.id, text: item.title, due_ms: item.due_ms};
-            // The quiet heads-up, once.
+            const reminder = {id: item.id, text: item.title, due_ms: item.due_ms, repeat: item.repeat ?? ''};
+            // The quiet heads-up, once. It says the minutes left now, not the setting: a wake after a
+            // suspend may leave fewer.
             if (!this._warned.has(item.id) && item.due_ms - lead <= now && item.due_ms > now) {
                 this._warned.add(item.id);
-                this._onDue(reminder, 'soon', () => {});
+                const minutes = Math.max(1, Math.round((item.due_ms - now) / 60000));
+                this._onDue({...reminder, minutes}, 'soon', () => {});
             }
             // The hour itself.
             if (item.due_ms <= now && !this._shown.has(item.id)) {

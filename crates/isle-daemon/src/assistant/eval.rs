@@ -56,6 +56,14 @@ impl Agenda {
                 "done_task" | "remove_task" => self.todos.retain(|(item, _)| Some(*item) != id),
                 "remove_event" => self.events.retain(|(item, _)| Some(*item) != id),
                 "cancel_reminder" => self.reminders.retain(|(item, _)| Some(*item) != id),
+                "reschedule_reminder" => {
+                    for (item, line) in &mut self.reminders {
+                        if Some(*item) == id {
+                            *line =
+                                format!("{}: {text}", action["when"].as_str().unwrap_or_default());
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -1260,6 +1268,20 @@ fn cases() -> Vec<Case> {
             ],
             |a| {
                 let a = last(a);
+                // Either it moves the one it made, or it cancels it and makes another: both are right.
+                if let Ok(moved) = action(a, "reschedule_reminder") {
+                    ensure(
+                        moved["id"].as_u64() == Some(100),
+                        "moved the wrong reminder",
+                    )?;
+                    ensure(
+                        moved["when"]
+                            .as_str()
+                            .is_some_and(|when| when.contains("20")),
+                        "did not change to 20",
+                    )?;
+                    return Ok(());
+                }
                 ensure(
                     action(a, "remind")?["when"]
                         .as_str()

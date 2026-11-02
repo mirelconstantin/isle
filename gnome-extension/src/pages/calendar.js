@@ -16,10 +16,9 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {REMINDER_LATE_MS, occurrenceKey, parseReminderId, spanOf, standsInFor} from '../calendarRules.js';
 import {VERTICAL, onUiScale, px} from '../compat.js';
 import * as Format from '../format.js';
-import {icon, iconButton, label} from '../widgets.js';
+import {icon, iconButton, label, onHover} from '../widgets.js';
 import * as WorldClocks from '../worldClocks.js';
 import {Page} from './page.js';
-import {onHover} from './tasks.js';
 
 /** The month grid's height, shared by its rows: what the page has under the title and weekdays (39 of its
  * 144 inside); sizes in CSS pixels (see `px`). Five weeks fill it, six take smaller days (`isle-cal-six-weeks`). */

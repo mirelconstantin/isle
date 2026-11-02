@@ -145,6 +145,12 @@
       <summary>Minutes before a reminder its quiet heads-up shows</summary>
       <description>0 shows it only when it is due. The reminder itself still alerts at its time.</description>
     </key>
+    <key name="reminder-snooze-minutes" type="i">
+      <range min="1" max="120"/>
+      <default>10</default>
+      <summary>How long a reminder's Snooze puts it off</summary>
+      <description>The minutes the alert's Snooze adds, for every reminder.</description>
+    </key>
     <key name="event-calendar" type="s">
       <default>''</default>
       <summary>Where new events go</summary>

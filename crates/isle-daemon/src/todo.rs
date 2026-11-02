@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use chrono::{Duration, Local, NaiveDateTime, TimeZone};
+use chrono::{Duration, Local, NaiveDateTime, TimeZone, Timelike};
 use isle_core::todo::TodoList;
 use isle_core::when;
 use log::warn;
@@ -124,20 +124,64 @@ fn not_found(id: u64) -> fdo::Error {
     fdo::Error::InvalidArgs(format!("no task with id {id}"))
 }
 
+/// The rule a bus string names: empty is none, and anything else must be one Isle knows.
+fn repeat_from(repeat: &str) -> fdo::Result<Option<&'static str>> {
+    if repeat.trim().is_empty() {
+        return Ok(None);
+    }
+    when::Repeat::parse(repeat)
+        .map(|rule| Some(rule.as_str()))
+        .ok_or_else(|| fdo::Error::InvalidArgs(format!("`{repeat}` is not a repeat Isle knows")))
+}
+
+/// Local wall-clock time for epoch milliseconds.
+fn naive_of(ms: i64) -> Option<NaiveDateTime> {
+    Local
+        .timestamp_millis_opt(ms)
+        .single()
+        .map(|at| at.naive_local())
+}
+
+/// Moves a repeating task on to its next occurrence, past both its due time and `now`, and lets its alert
+/// show again; false when the task does not repeat. A task ticked early moves a whole period on.
+fn roll_forward(list: &mut TodoList, id: u64, now: i64) -> bool {
+    let Some(item) = list.get(id) else {
+        return false;
+    };
+    let Some(rule) = item.repeat.as_deref().and_then(when::Repeat::parse) else {
+        return false;
+    };
+    let Some(due) = item.due_ms else {
+        return false;
+    };
+    let Some(due_at) = naive_of(due) else {
+        return false;
+    };
+    let minutes = due_at.hour() * 60 + due_at.minute();
+    let base = naive_of(due.max(now)).unwrap_or(due_at);
+    list.set_due(id, Some(epoch_ms(rule.next(base, minutes))))
+}
+
 #[interface(name = "io.github.zickrian.isle.Todo1")]
 impl TodoService {
-    /// Adds a task due at `due_ms` (0 for none) and returns its id.
+    /// Adds a task due at `due_ms` (0 for none) that comes back as `repeat` says ("day", "weekday",
+    /// "mon"…"sun"; empty for one that doesn't), and returns its id.
     async fn add(
         &mut self,
         text: &str,
         due_ms: i64,
+        repeat: &str,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> fdo::Result<u64> {
         let due = due_from(due_ms)?;
+        let repeat = repeat_from(repeat)?;
         let id = self
             .list
             .add(text, due)
             .ok_or_else(|| fdo::Error::InvalidArgs("a task needs a title".into()))?;
+        if let Some(repeat) = repeat {
+            self.list.set_repeat(id, Some(repeat));
+        }
         self.changed(&emitter).await?;
         Ok(id)
     }
@@ -156,18 +200,34 @@ impl TodoService {
         Ok(self.changed(&emitter).await?)
     }
 
-    /// Reads a line as a reminder: `{title, due_ms}` (`due_ms` 0 when it has no time), as the Reminders
-    /// page and the assistant read it.
+    /// Sets how a task comes back once it is done ("day", "weekday", "mon"…"sun"; empty stops it).
+    async fn set_repeat(
+        &mut self,
+        id: u64,
+        repeat: &str,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+    ) -> fdo::Result<()> {
+        let repeat = repeat_from(repeat)?;
+        if !self.list.set_repeat(id, repeat) {
+            return Err(not_found(id));
+        }
+        Ok(self.changed(&emitter).await?)
+    }
+
+    /// Reads a line as a reminder: `{title, due_ms, repeat}` (`due_ms` 0 when it has no time, `repeat` ""
+    /// when it does not come back), as the Reminders page and the assistant read it.
     async fn parse(&self, text: &str) -> fdo::Result<String> {
         let when = when::parse(text, Local::now().naive_local());
         if when.title.trim().is_empty() {
             return Err(fdo::Error::InvalidArgs("a reminder needs a title".into()));
         }
         let due = when.at.map(epoch_ms).unwrap_or(0);
-        Ok(serde_json::json!({"title": when.title, "due_ms": due}).to_string())
+        let repeat = when.repeat.map(|rule| rule.as_str()).unwrap_or_default();
+        Ok(serde_json::json!({"title": when.title, "due_ms": due, "repeat": repeat}).to_string())
     }
 
-    /// Notes that a task's due alert was shown (`alerted` false puts it back in line for one).
+    /// Notes that a task's due alert was shown (`alerted` false puts it back in line for one). A repeating
+    /// task keeps its time until it is ticked off: its next one is counted from there (see `set_done`).
     async fn set_alerted(
         &mut self,
         id: u64,
@@ -180,13 +240,17 @@ impl TodoService {
         Ok(self.changed(&emitter).await?)
     }
 
-    /// Ticks a task off, or back on.
+    /// Ticks a task off, or back on. A repeating one is never finished: ticking it moves it on to its next
+    /// occurrence instead, so the list keeps it.
     async fn set_done(
         &mut self,
         id: u64,
         done: bool,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> fdo::Result<()> {
+        if done && roll_forward(&mut self.list, id, now_ms()) {
+            return Ok(self.changed(&emitter).await?);
+        }
         if !self.list.set_done(id, done, now_ms()) {
             return Err(not_found(id));
         }

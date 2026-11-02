@@ -6,7 +6,8 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 
-import {editableWhen, isLate, order, whenText} from '../../gnome-extension/src/reminderRules.js';
+import {dayChoices, defaultDue, dueAt, editableWhen, isLate, lateness, minutesOf, order, pickerText,
+    presetMoments, repeatChoices, repeatText, stepMinutes, stripDay, whenText} from '../../gnome-extension/src/reminderRules.js';
 
 /** Saturday 2026-10-31 10:00, local. */
 const NOW = new Date(2026, 9, 31, 10, 0).getTime();
@@ -61,4 +62,87 @@ test('the field starts with words the parser reads back', () => {
 
 test('another year says the year', () => {
     assert.equal(whenText({due_ms: new Date(2027, 0, 4, 9).getTime()}, NOW, time), '4 Jan 2027 09:00');
+});
+
+test('the sheet offers today and the week after', () => {
+    const days = dayChoices(NOW);
+    assert.deepEqual(days.map(day => day.label),
+        ['Today', 'Tomorrow', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']);
+    assert.equal(days[0].ms, new Date(2026, 9, 31).getTime());
+    assert.equal(days[7].ms, new Date(2026, 10, 7).getTime());
+});
+
+test('the sheet starts at the next quarter hour, an hour on', () => {
+    assert.equal(defaultDue(NOW), new Date(2026, 9, 31, 11, 0).getTime());
+    assert.equal(defaultDue(new Date(2026, 9, 31, 10, 1).getTime()), new Date(2026, 9, 31, 11, 15).getTime());
+    assert.equal(defaultDue(new Date(2026, 9, 31, 23, 30).getTime()), new Date(2026, 10, 1, 0, 30).getTime());
+});
+
+test('a day and a time of day make the moment, and the time wraps', () => {
+    const day = new Date(2026, 9, 31).getTime();
+    const due = dueAt(day, 17 * 60 + 30);
+    assert.equal(new Date(due).getHours(), 17);
+    assert.equal(new Date(due).getMinutes(), 30);
+    assert.equal(minutesOf(due), 17 * 60 + 30);
+    assert.equal(stepMinutes(23 * 60 + 45, 15), 0);
+    assert.equal(stepMinutes(0, -15), 23 * 60 + 45);
+});
+
+test('the sheet says the day as well as the time', () => {
+    assert.equal(pickerText(at(31, 17), NOW, time), 'Today 17:00');
+    assert.equal(pickerText(on(10, 1, 9, 30), NOW, time), 'Tomorrow 09:30');
+    assert.equal(pickerText(on(10, 3, 9), NOW, time), 'Tue 09:00');
+    assert.equal(pickerText(on(10, 10, 9, 30), NOW, time), '10 Nov 09:30');
+    assert.equal(pickerText(new Date(2027, 0, 4, 9).getTime(), NOW, time), '4 Jan 2027 09:00');
+});
+
+test('a repeat reads as words, and says nothing for one that does not come back', () => {
+    assert.equal(repeatText(''), '');
+    assert.equal(repeatText(null), '');
+    assert.equal(repeatText('day'), 'Every day');
+    assert.equal(repeatText('weekday'), 'Weekdays');
+    assert.equal(repeatText('mon'), 'Every Mon');
+    assert.equal(repeatText('sun'), 'Every Sun');
+    // A rule Isle does not know says nothing rather than something wrong.
+    assert.equal(repeatText('fortnightly'), '');
+});
+
+test('the repeat chips follow the picked day', () => {
+    // Saturday 31 October: its weekly chip is that Saturday.
+    assert.deepEqual(repeatChoices(at(31, 17)), [
+        {value: '', label: 'Once'},
+        {value: 'day', label: 'Daily'},
+        {value: 'weekday', label: 'Weekdays'},
+        {value: 'sat', label: 'Every Sat'},
+    ]);
+    assert.equal(repeatChoices(on(10, 2, 9))[3].value, 'mon');
+});
+
+test('the one-click moments are an hour on, tonight and tomorrow morning', () => {
+    assert.deepEqual(presetMoments(NOW, time), [
+        {label: 'In 1 hour', ms: NOW + 60 * 60_000},
+        {label: 'Tonight 18:00', ms: at(31, 18)},
+        {label: 'Tomorrow 09:00', ms: on(10, 1, 9)},
+    ]);
+    // Past six in the evening, tonight is no longer offered.
+    const evening = at(31, 19);
+    assert.deepEqual(presetMoments(evening, time).map(preset => preset.label),
+        ['In 1 hour', 'Tomorrow 09:00']);
+});
+
+test('the strip stops at its ends', () => {
+    const days = dayChoices(NOW);
+    assert.equal(stripDay(days, days[0].ms, 1), days[1].ms);
+    assert.equal(stripDay(days, days[0].ms, -1), days[0].ms);
+    assert.equal(stripDay(days, days[7].ms, 1), days[7].ms);
+    assert.equal(stripDay(days, days[3].ms, -2), days[1].ms);
+    // A day the strip does not hold starts it at the beginning.
+    assert.equal(stripDay(days, on(11, 20, 9), 1), days[1].ms);
+});
+
+test('a moment says how late it is, and nothing while it is ahead', () => {
+    assert.equal(lateness(NOW + 60_000, NOW), '');
+    assert.equal(lateness(NOW - 20_000, NOW), 'now');
+    assert.equal(lateness(NOW - 12 * 60_000, NOW), '12m late');
+    assert.equal(lateness(NOW - 2 * 60 * 60_000, NOW), '2h late');
 });

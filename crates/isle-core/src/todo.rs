@@ -18,6 +18,9 @@ pub struct TodoItem {
     /// When it is due, in milliseconds since the Unix epoch; `None` for a plain to-do.
     #[serde(default)]
     pub due_ms: Option<i64>,
+    /// How it comes back once it is done ("day", "weekday", "mon"…"sun"); `None` for one that doesn't.
+    #[serde(default)]
+    pub repeat: Option<String>,
     /// Whether its due alert was already shown, so it is not shown again after a restart.
     #[serde(default)]
     pub alerted: bool,
@@ -49,9 +52,22 @@ impl TodoList {
             done: false,
             done_at_ms: None,
             due_ms,
+            repeat: None,
             alerted: false,
         });
         Some(self.next_id)
+    }
+
+    /// The task with this id.
+    pub fn get(&self, id: u64) -> Option<&TodoItem> {
+        self.items.iter().find(|item| item.id == id)
+    }
+
+    /// Sets how a task comes back once it is done (or stops it coming back); false when it was not found.
+    pub fn set_repeat(&mut self, id: u64, repeat: Option<&str>) -> bool {
+        self.find(id)
+            .map(|item| item.repeat = repeat.map(str::to_owned))
+            .is_some()
     }
 
     /// Ticks a task off (noting when) or back on; returns whether it was found.
@@ -185,6 +201,19 @@ mod tests {
         assert!(list.set_due(id, Some(2_000)));
         assert!(!list.items()[0].alerted);
         assert!(!list.set_alerted(id + 1, true));
+    }
+
+    #[test]
+    fn a_repeat_is_kept_and_can_go() {
+        let mut list = TodoList::default();
+        let id = list.add("Gym", Some(1_000)).unwrap();
+        assert_eq!(list.items()[0].repeat, None);
+        assert!(list.set_repeat(id, Some("mon")));
+        assert_eq!(list.items()[0].repeat.as_deref(), Some("mon"));
+        assert_eq!(list.get(id).map(|item| item.title.as_str()), Some("Gym"));
+        assert!(list.set_repeat(id, None));
+        assert_eq!(list.items()[0].repeat, None);
+        assert!(!list.set_repeat(id + 1, Some("day")));
     }
 
     #[test]

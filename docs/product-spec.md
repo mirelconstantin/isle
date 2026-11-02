@@ -245,7 +245,7 @@ and apps show only once there is a word, so the empty surface stays short.
   | Timer with privacy dots | its ring | the dots |
   | Call and music | green phone | the song's cover |
   | Music and timer | cover art | the timer's ring |
-  | A reminder inside its heads-up window, nothing else | – | a bell and the time left |
+  | A reminder inside its heads-up window, nothing else | – | a check and the time left |
 
   The timer's glyph, ring and time are white while focusing and green on a break, and dim while
   paused. A reminder's countdown takes the right slot only when nothing else needs it ("9m", and the
@@ -477,25 +477,42 @@ the cursor there).
 
 A reminder may carry a time, and the line says it: "Call the bank tomorrow
 17:00" is read by isled (`Todo1.Parse`: a time of day, `today`, `tomorrow`,
-`tonight`, a weekday, `on 3 Nov`, `in 10 min`), and the new row shows what it
-read as a chip at its right ("Tomorrow 17:00"); a line with no time is a plain
-to-do. Rows are ordered late first, then the soonest, then the untimed as they
-were added, and each says its time at the right: "17:00", "Tomorrow 09:30",
-"Tue 09:00", or "12m late" in the page's orange, said again every half minute
-while the page is open. Clicking that time opens a field the same parser reads
-back (empty clears it). Clicking the title renames it in place (Enter or
-clicking away saves, Esc cancels). ▶ and × take the time's place while the
-pointer is on the row or it has the keyboard, ▶ starting a focus session on it.
+`tonight`, a weekday, `on 3 Nov`, `in 10 min`, and their Indonesian words
+`hari ini`, `besok`, `lusa`, `malam`, `senin`…`minggu`), and the new row shows
+what it read as a chip at its right ("Tomorrow 17:00"); a line with no time is
+a plain to-do. Rows are ordered late first, then the soonest, then the untimed
+as they were added — the untimed under a quiet "No time", so a reminder due
+next month cannot push "Water the plants" out of sight. Each row says its time
+at the right: "17:00", "Tomorrow 09:30", "Tue 09:00", or "12m late" in the
+page's orange, said again every half minute while the page is open, and
+"· Every Mon" after it when it comes back.
+
+Clicking that time — or "Add time" on a plain to-do, or the new row's chip —
+opens the time sheet over the list: the reminder's name and what the pick
+means ("Tomorrow 09:30", or "Today 09:00 · 8h late"), today and the next seven
+days as chips, the time between − and + (a quarter hour a click) with **In 1
+hour**, **Tonight 18:00** and **Tomorrow 09:00** a click away, **Once · Daily ·
+Weekdays · Every Mon** for how it comes back, and **Type** for the line's words
+("on 3 Nov", "in 2h", "every monday 9am"), **Clear** and **Done**. What is
+picked is what is set, late or not; the words keep the parser's "a time
+already past today means tomorrow". The sheet takes the keyboard: ← → a day,
+↑ ↓ a quarter hour, Enter keeps it, Delete clears it, Esc cancels. Clicking
+the title renames it in place (Enter or clicking away saves, Esc cancels). ▶
+and × sit to the left of the time while the pointer is on the row or it has
+the keyboard, ▶ starting a focus session on it.
 
 The list takes the keyboard: ↑ ↓ move between rows (and past the last one into
-the new row's field), Space ticks, Enter renames, Delete removes, and a click
-on a row's own space gives it the keyboard.
+the new row's field), Space ticks, Enter renames, T sets the time, Delete
+removes, and a click on a row's own space gives it the keyboard.
 
 Ticking one fills its ring
 with an orange dot and strikes the title through at once (a wrapped title,
 along its first line); it lingers 0.9 s
 (a second tap undoes it), then fades and folds away, the rows below sliding
-up. Closing the island in that moment keeps it done. Empty: "No reminders ·
+up. Closing the island in that moment keeps it done. A reminder that comes
+back ("every monday 9:00", "every day") is never finished: ticking it moves it
+on to its next occurrence, counted from its due time, or from now when that
+has passed, so it stays in the list. Empty: "No reminders ·
 type above, or press Super+K", or "All done" once today's are ticked off. Done
 ones are cleared at midnight.
 
@@ -584,11 +601,12 @@ banner does. Right-clicking an alert puts it away without opening it.
 | Caps Lock (instant) | ⇪ | Caps Lock on / off | – | 1.5 s |
 | New song (off by default) | cover | title / artist | – | 2.6 s |
 | Timer phase ends (+ chime) | timer | Focus session done… | Start break | 8 s |
-| Reminder at its hour (+ alarm) | bell | the reminder's text | Done (primary), Snooze 10 min | sticky |
+| Reminder at its hour (+ alarm) | check (the Reminders tab's) | the reminder's text | Done (primary), Snooze (Settings: 1–120 min, 10 by default) | sticky |
 | Screen recording started | red record icon | Recording screen | Stop | 2.6 s |
 | Notification (GNOME's sound) | app icon, large | title / first line (only who it is from while the screen is shared) | its first button ("Mark as read") | 4 s; passing (a screenshot taken) 2.5 s; critical 20 s, instant and sticky |
-| Reminder about to be due (Settings: 0–60 min before, 10 by default) | bell | the reminder in 10 min / 17:00 · Reminder | – | 6 s, one short sound |
-| Reminder (+ chime) | bell | the reminder / 17:00 · Reminder | Snooze 10 min, Done | 8 s, sticky |
+| Reminder about to be due (Settings: 0–60 min before, 10 by default) | check | the reminder in 10 min / 17:00 · Reminder | – | 6 s, one short sound |
+| Reminder (+ chime) | check | the reminder / 17:00 · Reminder | Snooze (Settings: 1–120 min), Done | 8 s, sticky |
+| Reminder ticked off from its alert | check | the reminder / Done | Undo (a reminder that comes back goes to the time it had) | 5 s |
 | Assistant done in the background (resting the pointer holds it; it opens no page) | mic | the answer / Isle Assistant (· Click to read more, when cut) | – | as long as it takes to read, at most 8 s |
 | Isle's service stopped | warning | Isle's service isn't running | Restart | 8 s |
 | Newer Isle (once per version) | update | Isle 0.x is out | How | 8 s |

@@ -76,8 +76,6 @@ const STILL_OUTSIDE_MS = 30000;
 const COLLAPSE_DELAY_MS = 300;
 /** An alert the pointer rested on stays this long once it leaves, to finish reading. */
 const ALERT_LEAVE_MS = 1500;
-/** How long a reminder's Snooze puts it off. */
-const SNOOZE_MS = 10 * 60 * 1000;
 /** Touchpad travel over an alert that puts it away (up) or opens the island (down); a wheel's click is one. */
 const ALERT_SWIPE = 1.5;
 /** A pause this long between scroll events starts a new swipe. */
@@ -364,21 +362,23 @@ export class Controller {
             // The heads-up is quiet: no button, gone by itself, one short sound.
             if (kind === 'soon') {
                 this._chime(SOUNDS.reminderSoon);
-                this._post(Alerts.reminderSoon(reminder, this._settings.get_int('reminder-alert-minutes')));
+                this._post(Alerts.reminderSoon(reminder));
                 return;
             }
             this._post(Alerts.reminder(reminder, () => {
                 this._chime(SOUNDS.reminder);
                 done();
             }, {
-                // Marked shown first: a snooze clears that mark again (see `SetDue`).
+                snooze: this._settings.get_int('reminder-snooze-minutes'),
+                // The new time clears the "shown" mark itself (see `SetDue`), so it is not marked again here:
+                // a mark landing after it would keep the snoozed reminder quiet for good.
                 onSnooze: () => {
-                    done();
-                    this._daemon.call('todo', 'SetDue', reminder.id, Date.now() + SNOOZE_MS);
+                    this._daemon.call('todo', 'SetDue', reminder.id,
+                        Date.now() + this._settings.get_int('reminder-snooze-minutes') * 60000);
                 },
                 onDone: () => {
-                    done();
                     this._daemon.call('todo', 'SetDone', reminder.id, true);
+                    this._post(Alerts.reminderDone(reminder, () => this._undoDone(reminder)));
                 },
             }));
         });
@@ -476,7 +476,15 @@ export class Controller {
                 parsed = null;
             }
         }
-        this._daemon.call('todo', 'Add', parsed?.title ?? line, parsed?.due_ms ?? 0);
+        this._daemon.call('todo', 'Add', parsed?.title ?? line, parsed?.due_ms ?? 0, parsed?.repeat ?? '');
+    }
+
+    /** Puts back a reminder ticked off from its alert: one that comes back goes to the time it had. */
+    _undoDone(reminder) {
+        if (reminder.repeat)
+            this._daemon.call('todo', 'SetDue', reminder.id, reminder.due_ms);
+        else
+            this._daemon.call('todo', 'SetDone', reminder.id, false);
     }
 
     /** Starts a focus session on a reminder, and shows the Focus page. */

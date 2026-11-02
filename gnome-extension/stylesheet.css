@@ -746,7 +746,12 @@
 .isle-reminder-remove, .isle-reminder-focus { padding: 3px; border-radius: 99px; color: rgba(255, 255, 255, 0.5); }
 .isle-reminder-remove:hover, .isle-reminder-focus:hover { color: #ffffff; background-color: rgba(255, 255, 255, 0.1); }
 
-/* The time at the right of a row, by its first line: quiet, and the page's orange once it is late. */
+/* The time at the right of a row, by its first line: quiet, and the page's orange once it is late.
+ * It stays visible and clickable while the row is lit; ▶ and × show in the room kept to its left. */
+.isle-reminder-slot { spacing: 0; }
+.isle-reminder-actions { spacing: 2px; }
+.isle-reminder-when-button { padding: 0; background-color: transparent; border-radius: 4px; }
+.isle-reminder-when-button:hover { background-color: rgba(255, 255, 255, 0.08); }
 .isle-reminder-when {
   font-size: 11px;
   color: rgba(255, 255, 255, 0.45);
@@ -754,11 +759,53 @@
   font-feature-settings: "tnum";
 }
 .isle-reminder-when.late { color: #ff9f0a; }
-/* The ▶ and × that take the time's place while a row is lit. */
-.isle-reminder-actions { spacing: 2px; }
-/* The line being typed, as quiet as the hint it stands in for. */
-.isle-reminder-new-when { color: rgba(255, 255, 255, 0.55); }
-.isle-reminder-when-field { font-size: 11px; }
+/* A plain to-do's: the way to give it a time. */
+.isle-reminder-when-add { color: rgba(255, 255, 255, 0.3); }
+
+/* The new row's time, or "Add time": a quiet pill at the end of the field. */
+.isle-when-chip {
+  padding: 3px 9px;
+  border-radius: 99px;
+  background-color: rgba(255, 255, 255, 0.06);
+  margin-bottom: 1px;
+}
+.isle-when-chip:hover { background-color: rgba(255, 255, 255, 0.12); }
+.isle-when-chip-label { font-size: 11px; color: rgba(255, 255, 255, 0.5); font-feature-settings: "tnum"; }
+.isle-when-chip.set .isle-when-chip-label { color: #ff9f0a; }
+
+/* The time sheet over the list: the reminder's name and the picked time, the days, the time, and Done. */
+.isle-when-sheet { spacing: 5px; padding-top: 1px; }
+.isle-when-top { spacing: 8px; height: 20px; }
+.isle-when-title { font-size: 13px; font-weight: 600; color: #ffffff; }
+.isle-when-effective { font-size: 11px; color: #ff9f0a; font-feature-settings: "tnum"; }
+.isle-when-effective.bad { color: #ff453a; }
+.isle-when-close { padding: 2px; border-radius: 99px; color: rgba(255, 255, 255, 0.5); }
+.isle-when-close:hover { color: #ffffff; background-color: rgba(255, 255, 255, 0.1); }
+.isle-when-picker { spacing: 4px; }
+.isle-when-days { spacing: 6px; }
+.isle-when-day { font-size: 11px; padding: 4px 10px; color: rgba(255, 255, 255, 0.72); }
+.isle-when-day.selected { background-color: #ff9f0a; color: #000000; }
+.isle-when-day.selected:hover { background-color: #ffb340; }
+.isle-when-time-row { spacing: 4px; height: 22px; }
+.isle-when-step { padding: 3px; border-radius: 99px; color: rgba(255, 255, 255, 0.55); }
+.isle-when-step:hover { color: #ffffff; background-color: rgba(255, 255, 255, 0.1); }
+.isle-when-time { font-size: 13.5px; font-weight: 600; font-feature-settings: "tnum"; }
+/* A little air between the stepper and the one-click moments. */
+.isle-when-gap { width: 10px; }
+.isle-when-preset { font-size: 11px; padding: 4px 10px; color: rgba(255, 255, 255, 0.62); }
+.isle-when-bottom { spacing: 6px; height: 22px; }
+/* Once · Daily · Weekdays · Every Mon: the picked one in the page's orange. */
+.isle-when-repeats { spacing: 6px; }
+.isle-when-repeat { font-size: 11px; padding: 4px 10px; color: rgba(255, 255, 255, 0.62); }
+.isle-when-repeat.selected { background-color: #ff9f0a; color: #000000; }
+.isle-when-repeat.selected:hover { background-color: #ffb340; }
+.isle-when-type, .isle-when-clear { font-size: 11px; padding: 4px 10px; }
+.isle-when-done { font-size: 11px; padding: 4px 14px; }
+.isle-when-words { font-size: 13px; }
+.isle-when-words.bad { box-shadow: inset 0 -1px 0 #ff453a; }
+
+/* The heading over the plain to-dos, level with the titles above them. */
+.isle-reminder-group { font-size: 11px; font-weight: 600; color: rgba(255, 255, 255, 0.4); padding: 7px 0 1px 28px; }
 
 .isle-reminders-empty { font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, 0.55); padding-top: 22px; }
 
