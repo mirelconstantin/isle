@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 
-import {callStreamOf, callWindowIndex, isEngineName, serviceOf, streamOwner} from '../../gnome-extension/src/callServices.js';
+import {callStreamOf, callWindowIndex, isEngineName, ownerOfDump, serviceOf, streamOwner} from '../../gnome-extension/src/callServices.js';
 
 const chrome = (title, focused = false) => ({title: `${title} - Google Chrome`, focused});
 
@@ -14,6 +14,46 @@ test('a title names its service', () => {
     assert.equal(serviceOf('Meet - kgm-mwyq-mge - Google Chrome'), 'Google Meet');
     assert.equal(serviceOf('(4) WhatsApp - Google Chrome'), 'WhatsApp');
     assert.equal(serviceOf('Tulis Lab - Google Chrome'), null);
+});
+
+test('every call service, installed or in a browser, is named', () => {
+    const named = [
+        ['(3) WhatsApp', 'WhatsApp'],
+        ['Telegram', 'Telegram'],
+        ['Discord | #general', 'Discord'],
+        ['Zoom Meeting', 'Zoom'],
+        ['Weekly sync | Microsoft Teams meeting', 'Microsoft Teams'],
+        ['Jitsi Meet - Google Chrome', 'Jitsi Meet'],
+        ['#isle - Workspace - Slack', 'Slack'],
+        ['Messenger', 'Messenger'],
+        ['Signal', 'Signal'],
+        ['Skype', 'Skype'],
+        ['Webex Meeting', 'Webex'],
+        ['Google Chat - Google Chrome', 'Google Chat'],
+        ['Guilded - Chat', 'Guilded'],
+        ['Revolt', 'Revolt'],
+        ['Zulip - #dev', 'Zulip'],
+        ['Mattermost - Town square', 'Mattermost'],
+        ['Whereby', 'Whereby'],
+        ['GoTo Meeting', 'GoTo Meeting'],
+        ['BlueJeans', 'BlueJeans'],
+        ['Amazon Chime', 'Amazon Chime'],
+        ['Viber', 'Viber'],
+        ['WeChat', 'WeChat'],
+        ['Mumble', 'Mumble'],
+        ['TeamSpeak 3', 'TeamSpeak'],
+        ['DingTalk', 'DingTalk'],
+        ['Meet - kgm-mwyq-mge - Google Chrome', 'Google Meet'],
+    ];
+    for (const [title, service] of named)
+        assert.equal(serviceOf(title), service, title);
+});
+
+test('a meeting whose name holds "meet" is still its own service', () => {
+    assert.equal(serviceOf('Meet with Ana - Zoom'), 'Zoom');
+    assert.equal(serviceOf('Meet and greet - Zoom Meeting'), 'Zoom');
+    assert.equal(serviceOf('Meet the team | Microsoft Teams'), 'Microsoft Teams');
+    assert.equal(serviceOf('Google Meet - Google Chrome'), 'Google Meet');
 });
 
 test('a Meet call is not taken for WhatsApp Web open in another window', () => {
@@ -34,6 +74,29 @@ test('else the most recently used, and none without a service', () => {
     assert.equal(callWindowIndex([chrome('(4) WhatsApp'), chrome('Telegram Web')]), 0);
     assert.equal(callWindowIndex([chrome('Tulis Lab'), chrome('YouTube')]), -1);
     assert.equal(callWindowIndex([]), -1);
+});
+
+test('a stream is traced to its process in pw-dump too, where pactl is not installed', () => {
+    const dump = JSON.stringify([
+        {id: 0, type: 'PipeWire:Interface:Core', info: {props: {}}},
+        {id: 42, type: 'PipeWire:Interface:Node', info: {props: {
+            'media.class': 'Stream/Input/Audio', 'application.name': 'Zoom', 'application.process.id': 4321,
+            'application.process.binary': 'zoom',
+        }}},
+        {id: 43, type: 'PipeWire:Interface:Node', info: {props: {
+            'media.class': 'Stream/Output/Audio', 'application.name': 'Chromium input', 'application.process.id': 99,
+        }}},
+        {id: 44, type: 'PipeWire:Interface:Node', info: {props: {
+            'media.class': 'Stream/Input/Audio', 'application.name': 'Chromium input', 'application.process.id': 327,
+            'application.process.binary': 'chrome',
+        }}},
+    ]);
+    assert.deepEqual(ownerOfDump(dump, 'Zoom'), {pid: 4321, binary: 'zoom'});
+    // Only an input stream: the same name on an output is another node.
+    assert.deepEqual(ownerOfDump(dump, 'Chromium input'), {pid: 327, binary: 'chrome'});
+    assert.equal(ownerOfDump(dump, 'Firefox'), null);
+    assert.equal(ownerOfDump('not json', 'Zoom'), null);
+    assert.equal(ownerOfDump(dump, ''), null);
 });
 
 test("a voice engine's name is never taken for its app's", () => {

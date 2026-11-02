@@ -13,7 +13,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as Signals from 'resource:///org/gnome/shell/misc/signals.js';
 import {getMixerControl} from 'resource:///org/gnome/shell/ui/status/volume.js';
 
-import {BROWSERS, callStreamOf, callWindowIndex, isEngineName, serviceOf, streamOwner} from './callServices.js';
+import {BROWSERS, callStreamOf, callWindowIndex, isEngineName, ownerOfDump, serviceOf, streamOwner} from './callServices.js';
 import {LEVEL_METERS} from './privacy.js';
 
 /** The microphone must be held this long to count: sites open it briefly to ask for permission. */
@@ -77,6 +77,9 @@ export class CallMonitor extends Signals.EventEmitter {
         this.window = null;
         /** The call's microphone stream. */
         this._stream = null;
+        /** The stream whose mute is followed, and its handlers. */
+        this._mutedStream = null;
+        this._streamIds = [];
         /** The call service the call's window named, kept for the whole call. */
         this._service = null;
         this._streamName = null;
@@ -114,14 +117,26 @@ export class CallMonitor extends Signals.EventEmitter {
         return this.active && this._privacy.camera;
     }
 
-    /** Whether the microphone (GNOME's default input) is muted, for every app. */
+    /** Whether the call's microphone is muted: its own stream, or the input it records from. */
     get muted() {
-        return this._source?.is_muted ?? false;
+        return Boolean(this._stream?.is_muted || this._source?.is_muted);
     }
 
-    /** Mutes or unmutes the microphone from the call's button. */
+    /** Mutes or unmutes the call's microphone from the call's button. */
     toggleMuted() {
-        this._source?.change_is_muted(!this.muted);
+        const wanted = !this.muted;
+        let done = false;
+        // The call's own stream first, so that app alone is silenced (and a call recording from an input that is
+        // not the default one still answers), then the default input as GNOME's own microphone toggle does.
+        for (const target of [this._stream, this._source]) {
+            if (!target)
+                continue;
+            target.change_is_muted(wanted);
+            done = true;
+        }
+        if (!done)
+            console.warn('Isle: no microphone to mute for this call');
+        return done;
     }
 
     /** Whether an app besides the call's is using the microphone, which then still gets its dot. */
@@ -144,12 +159,21 @@ export class CallMonitor extends Signals.EventEmitter {
         return this.app?.get_icon() ?? null;
     }
 
-    /** Brings the call's window, or else its app, to the front. */
+    /** Brings the call's window, or else its app, to the front; false when there is neither. */
     raise() {
-        if (this.window)
-            Main.activateWindow(this.window);
-        else
-            this.app?.activate();
+        const window = this.window;
+        if (window) {
+            // From the taskbar too: activating a minimised window leaves it minimised.
+            if (window.minimized)
+                window.unminimize();
+            Main.activateWindow(window);
+            return true;
+        }
+        if (this.app) {
+            this.app.activate();
+            return true;
+        }
+        return false;
     }
 
     /** Only a running call has anything to redraw. */
@@ -175,6 +199,7 @@ export class CallMonitor extends Signals.EventEmitter {
     _sync() {
         const stream = this._callStream();
         this._stream = stream;
+        this._watchStream(stream);
         if (stream) {
             this._cancel('end');
             if (this.active) {
@@ -193,6 +218,17 @@ export class CallMonitor extends Signals.EventEmitter {
             this._later('end', this._settings.get_boolean('call-activity') ? END_DELAY_MS : 0, () => this._end());
     }
 
+    /** Follows the call's own stream's mute, so the button shows what the microphone does. */
+    _watchStream(stream) {
+        if (stream === this._mutedStream)
+            return;
+        this._streamIds.forEach(id => this._mutedStream?.disconnect(id));
+        this._streamIds = [];
+        this._mutedStream = stream;
+        if (stream)
+            this._streamIds = [stream.connect('notify::is-muted', () => this._changed())];
+    }
+
     /** The microphone is still held after the delay: the call is on. */
     _begin() {
         const stream = this._callStream();
@@ -202,6 +238,8 @@ export class CallMonitor extends Signals.EventEmitter {
         this.since = this._heldSince;
         global.display.list_all_windows().forEach(window => this._watchWindow(window));
         this._identify(stream);
+        // Once, what the call was taken for: "it names the wrong app" is answered from the journal.
+        console.log(`Isle: call in ${this.app?.get_name() ?? 'an app not known'}${this._service ? `, a ${this._service} one` : ''}`);
         this.emit('started');
         this.emit('changed');
     }
@@ -242,29 +280,47 @@ export class CallMonitor extends Signals.EventEmitter {
         return true;
     }
 
-    /** The app holding `stream` when its names say none (Discord's is "WEBRTC VoiceEngine"): by the process
-     * the sound server says holds it, asked once a stream; null until it answers. */
+    /** The app holding `stream` when its names say none (Discord's is "WEBRTC VoiceEngine", a browser's
+     * "Chromium input"): by the process the sound server says holds it, asked once a stream; null until it
+     * answers. */
     _ownerApp(stream) {
         const index = stream.get_index();
         if (this._owner?.index === index)
             return this._owner.app;
         this._owner = {index, app: null, pending: true};
+        // `pactl` first, its source-output indexes being Gvc's; on a PipeWire system without pactl installed
+        // (many have only `pw-cli`), the nodes are read from `pw-dump` by the stream's name.
+        this._ownerCommand(['pactl', 'list', 'source-outputs'], text => streamOwner(text, index), owner => {
+            if (owner) {
+                this._ownerFound(stream, index, owner);
+                return;
+            }
+            this._ownerCommand(['pw-dump'], text => ownerOfDump(text, stream.get_name()),
+                found => this._ownerFound(stream, index, found));
+        });
+        return this._owner.app;
+    }
+
+    /** Runs `argv` and hands what `parse` makes of its output to `done`; a command that is not there is `null`. */
+    _ownerCommand(argv, parse, done) {
         try {
             const launcher = new Gio.SubprocessLauncher({flags: Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE});
             launcher.setenv('LC_ALL', 'C', true);
-            const process = launcher.spawnv(['pactl', 'list', 'source-outputs']);
+            const process = launcher.spawnv(argv);
             process.communicate_utf8_async(null, this._cancellable, (_process, result) => {
-                let text = null;
+                let text;
                 try {
                     [, text] = process.communicate_utf8_finish(result);
-                } catch {}
-                this._ownerFound(stream, index, streamOwner(text, index));
+                } catch {
+                    done(null);
+                    return;
+                }
+                done(parse(text));
             });
         } catch {
-            // No pactl: the call apps running are all there is to go by.
-            this._ownerFound(stream, index, null);
+            // Not installed: the next way of asking, or the call apps running.
+            done(null);
         }
-        return this._owner.app;
     }
 
     /** Takes the app the sound server named for `stream`, else the one call app running, and shows it. */
@@ -308,13 +364,14 @@ export class CallMonitor extends Signals.EventEmitter {
         // Most recently used first.
         const appWindows = app ? app.get_windows().filter(usable) : [];
         // A browser's web app (Meet, WhatsApp Web) may run in a window the shell files under another app,
-        // but always of the same browser: a Meet tab in Firefox is not a call in Chrome.
+        // but always of the same browser: a Meet tab in Firefox is not a call in Chrome. An app that is not a
+        // browser keeps to its own windows: a Meet tab open in Chrome is not the window of a Discord call.
         const family = app ? appWindows.map(window => (window.get_wm_class() ?? '').match(BROWSERS)?.[0]).find(Boolean) : null;
-        const browserWindows = !app || family
+        const browserWindows = family
             ? global.display.list_all_windows().filter(window => usable(window) &&
-                (family ? (window.get_wm_class() ?? '').toLowerCase().includes(family.toLowerCase())
-                    : BROWSERS.test(window.get_wm_class() ?? '')))
-            : [];
+                (window.get_wm_class() ?? '').toLowerCase().includes(family.toLowerCase()))
+            : app ? [] : global.display.list_all_windows().filter(window => usable(window) &&
+                BROWSERS.test(window.get_wm_class() ?? ''));
         const candidates = [...new Set([...appWindows, ...browserWindows])];
         const current = candidates.includes(this.window) ? this.window : null;
         // Kept while it still shows the call; else a window whose title came to show it as the call left this one
@@ -477,6 +534,7 @@ export class CallMonitor extends Signals.EventEmitter {
         global.display.disconnect(this._windowCreatedId);
         this._setWindow(null);
         this._sourceIds.forEach(id => this._source.disconnect(id));
+        this._streamIds.forEach(id => this._mutedStream?.disconnect(id));
         this._mixerIds.forEach(id => this._mixer.disconnect(id));
         this._settings.disconnect(this._settingsId);
         this._privacy.disconnect(this._privacyId);

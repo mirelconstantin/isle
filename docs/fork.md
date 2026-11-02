@@ -81,6 +81,7 @@ The others, in order of how often they bite:
 | `pages/timer.js` | `WEEK_DAYS`, `focusTime`, `dayKey`, the task/stats/next rows, `meeting-requested`, `get tint` | Take upstream's `_init`, steppers and locking, then add our three builders to the steppers column |
 | `notifications.js`, `pages/notifications.js`, `focusMode.js` | timed DND | Keep upstream's DND handling, keep `dndUntil` and the ownership dance |
 | `pages/shelf.js`, `pages/clips.js` | stack mode, retention, search filters | Keep both; the cards' click path is ours |
+| `callServices.js`, `call.js`, `pages/call.js` | the service list and its order (Zoom and the rest before "meet"), the `pw-dump` fallback for the stream's owner, an app's call keeping to its own windows, the mute on the call's own stream, `raise()` out of the taskbar, the preview kept while sharing with its pill | Keep ours; the preview's layers (`_view`, `_placeholder`, `_corners`, `_hover`, `_badge`) and the two settings keys |
 | `pages/calendar.js` | `next-event`, `refreshNextEvent`, `todayEvents`, `get tint` | Keep both; upstream's `_scheduleAlarm` is where `_syncNextEvent()` is called |
 | `prefs.js`, the gschema | the keys below, the Shortcuts group, Devices in `PAGES`, `intChoiceRow` | Keep both; `glib-compile-schemas --strict` catches duplicate keys |
 | Rust | `isle-core/pomodoro.rs` (history), `isle-daemon/pomodoro.rs` (`State.history`), `clipboard.rs` (`SetRetention`), `system/bluetooth.rs` (UPower HID++ devices) | Upstream rarely touches these; if it does, keep our fields and re-run `cargo test -p isle-core` |
@@ -94,6 +95,7 @@ The others, in order of how often they bite:
 | `clipboard-retention-days` | `i` | `0` (until pushed out) | `Clipboard1.SetRetention` |
 | `focus-task-id`, `focus-task-title` | `s` | `''` | A reminder as the timer's task |
 | `reminder-alert-minutes` | `i` | `10` | The heads-up before a reminder (0: none) |
+| `call-preview-sharing` | `b` | `true` | Keep the call's preview while the screen is shared or recorded |
 | `dnd-until` | `x` | `0` | Timed DND's end, kept across restarts |
 | `dnd-owned` | `b` | `false` | Timed DND turned it on, so it may turn it off |
 

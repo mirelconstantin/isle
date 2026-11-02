@@ -215,7 +215,12 @@
     <key name="call-preview" type="b">
       <default>true</default>
       <summary>Live preview of the call</summary>
-      <description>The open island shows the call's window as it is on screen, so you see yourself and whoever you call. The shell draws it from the window; nothing is recorded, and it is hidden while you share your screen.</description>
+      <description>The open island shows the call's window as it is on screen, so you see yourself and whoever you call. The shell draws it from the window; nothing is recorded.</description>
+    </key>
+    <key name="call-preview-sharing" type="b">
+      <default>true</default>
+      <summary>Keep the call's preview while sharing the screen</summary>
+      <description>While your screen is shared or recorded, the island is on screen for whoever watches it: this keeps the call's preview there too, marked "Sharing". Off, the preview gives way to a hint instead.</description>
     </key>
     <key name="focus-dnd" type="b">
       <default>true</default>

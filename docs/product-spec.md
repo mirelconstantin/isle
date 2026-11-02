@@ -295,13 +295,19 @@ covered, minimised or on another workspace. GNOME Shell draws it from the
 window's picture already on the graphics card (a `Clutter.Clone`): nothing
 is captured, and it only exists while this page is open. Under the pointer
 an ↗ shows; click it to go to the call. It shows the app's icon instead
-while the preview is off (Settings → Calls) or no window is known, and
-"Hidden while sharing" while the screen is shared. On the right: the app's
-icon and the service or app name ("Google Meet", "WhatsApp"), "Voice call"
-or "Video call" (while the camera is on) with the length in green, and two
-round buttons with captions: **Mute** (GNOME's default microphone, for
-every app; white and "Muted" while on) and **Open** (brings the call's
-window to the front, switching workspace if needed, and closes the island).
+while the preview is off (Settings → Calls) or no window is known. While the
+screen is shared or recorded the island is on screen for whoever watches it, so
+the preview gives way to "Hidden while sharing" — unless Settings → Calls →
+While sharing is on (it is by default), which keeps the call there with a
+small "Sharing" (or "Recording") pill over it. On the right: the app's icon and
+the call's name — the service its window names ("Google Meet", "Zoom", "Discord",
+"Microsoft Teams", "Slack", "WhatsApp", "Telegram", "Signal", "Webex", "Jitsi",
+"Google Chat"…), or the app's own name when the window names none — "Voice call" or
+"Video call" (while the camera is on) with the length in green, and two round
+buttons with captions: **Mute** (the call's own microphone stream, so that app
+alone, and the default input when there is no stream; white and "Muted" while
+on) and **Open** (brings the call's window to the front, out of the taskbar
+too, switching workspace if needed, and closes the island).
 When the call ends the tab goes and an open island moves to the next page.
 
 **Music**, laid out as a now-playing card. On the left a 104 px cover

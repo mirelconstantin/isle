@@ -588,6 +588,16 @@
 .isle-call-preview-button:focus { color: #ffffff; }
 .isle-call-placeholder { spacing: 8px; }
 .isle-call-hint { font-size: 11px; font-weight: 500; color: rgba(255, 255, 255, 0.5); }
+/* Why the call is still in the preview while the screen is shared. */
+.isle-call-badge {
+  margin: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #ffffff;
+  background-color: rgba(0, 0, 0, 0.55);
+}
 
 /* Over the preview under the pointer: where a click goes. */
 .isle-call-preview-hover {

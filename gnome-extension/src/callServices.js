@@ -3,20 +3,39 @@
 
 // Telling a web call's window by its title, needing nothing of GNOME, kept apart so tests run it anywhere (tests/).
 
-/** Call services named in window titles, for calls in a browser. */
+/**
+ * Call services named in window titles, for calls in a browser. The first match wins, so the services whose
+ * names are their own come before the ones a title may merely mention: "Meet with Ana - Zoom" is a Zoom call,
+ * and "Meet" alone is the only thing a Google Meet tab says.
+ */
 const SERVICES = [
-    [/google meet|\bmeet\b/i, 'Google Meet'],
     [/whatsapp/i, 'WhatsApp'],
     [/telegram/i, 'Telegram'],
     [/discord/i, 'Discord'],
-    [/zoom/i, 'Zoom'],
+    [/\bzoom\b/i, 'Zoom'],
     [/microsoft teams|\bteams\b/i, 'Microsoft Teams'],
-    [/jitsi/i, 'Jitsi Meet'],
-    [/slack/i, 'Slack'],
-    [/messenger/i, 'Messenger'],
-    [/signal/i, 'Signal'],
-    [/skype/i, 'Skype'],
-    [/webex/i, 'Webex'],
+    [/\bjitsi\b/i, 'Jitsi Meet'],
+    [/\bslack\b/i, 'Slack'],
+    [/\bmessenger\b/i, 'Messenger'],
+    [/\bsignal\b/i, 'Signal'],
+    [/\bskype\b/i, 'Skype'],
+    [/\bwebex\b/i, 'Webex'],
+    [/google chat/i, 'Google Chat'],
+    [/\bguilded\b/i, 'Guilded'],
+    [/\brevolt\b/i, 'Revolt'],
+    [/\bzulip\b/i, 'Zulip'],
+    [/\bmattermost\b/i, 'Mattermost'],
+    [/\bwhereby\b/i, 'Whereby'],
+    [/goto ?meeting/i, 'GoTo Meeting'],
+    [/\bbluejeans\b/i, 'BlueJeans'],
+    [/\bchime\b/i, 'Amazon Chime'],
+    [/\bviber\b/i, 'Viber'],
+    [/\bwechat\b/i, 'WeChat'],
+    [/\bmumble\b/i, 'Mumble'],
+    [/\bteamspeak\b/i, 'TeamSpeak'],
+    [/\bdingtalk\b/i, 'DingTalk'],
+    // Last: a meeting's own name may hold "meet" ("Meet and greet - Zoom").
+    [/google meet|\bmeet\b/i, 'Google Meet'],
 ];
 
 /** A title showing a call under way, not only the service: a Meet code ("kgm-mwyq-mge"), or the words. */
@@ -48,6 +67,35 @@ export function streamOwner(text, index) {
         const property = key => new RegExp(`^\\s*${key.replaceAll('.', '\\.')} = "([^"]*)"`, 'm').exec(block)?.[1] ?? null;
         const pid = Number.parseInt(property('application.process.id') ?? '', 10);
         return {pid: pid > 0 ? pid : 0, binary: property('application.process.binary')};
+    }
+    return null;
+}
+
+/** Of `pw-dump`'s JSON, the process holding the input stream named `name`: {pid, binary} (0 and null when not
+ * said), or null. What `streamOwner` reads from `pactl`, for a PipeWire system without pactl installed. */
+export function ownerOfDump(text, name) {
+    if (!name)
+        return null;
+    let objects;
+    try {
+        objects = JSON.parse(text ?? '');
+    } catch {
+        return null;
+    }
+    if (!Array.isArray(objects))
+        return null;
+    const wanted = name.toLowerCase();
+    for (const object of objects) {
+        const props = object?.info?.props ?? {};
+        if (props['media.class'] !== 'Stream/Input/Audio')
+            continue;
+        const names = [props['application.name'], props['node.name'], props['media.name']]
+            .filter(Boolean)
+            .map(each => each.toLowerCase());
+        if (!names.includes(wanted))
+            continue;
+        const pid = Number.parseInt(props['application.process.id'] ?? '', 10);
+        return {pid: pid > 0 ? pid : 0, binary: props['application.process.binary'] ?? null};
     }
     return null;
 }
