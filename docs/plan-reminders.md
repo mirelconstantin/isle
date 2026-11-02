@@ -104,12 +104,13 @@ the chime, and Snooze moves it ten minutes on.
 
 ### 3 — Getting closer in the closed island
 
-**Done**: within the heads-up window the closed island shows a bell and the time left ("9m", seconds in the
-last minute, in the page's orange) in its right slot — and gives the slot up to the song's bars, the timer's
-time, a muted call or the assistant.
+**Done**: within the heads-up window the closed island is drawn as the timer is — its bell on the left and
+its time on the right, counting every second in the timer's own shape ("9:32"), in the page's orange for
+the last minute. Beside an activity it takes the right slot only when that is free, and gives it up to the
+song's bars, a muted call or the assistant.
 
-- A bell sign and its countdown take the right slot within the lead window:
-  `9m` in white, `45s` in the page's orange for the last minute.
+- A bell sign and its countdown, drawn as the timer is (bell left, time right):
+  `9:32` in white, orange for the last minute.
 - `compact.js`: `reminder` joins the activities after the timer; the countdown
   gets the timer time's width rules (`_fit`, `TEXT_INSET`); a warning (service
   down, muted call, assistant at work) still wins the slot.

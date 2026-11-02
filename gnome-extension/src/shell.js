@@ -26,9 +26,11 @@ const GLASS_BAR_CLASS = 'isle-glass-bar';
 const COMPACT_BAR_CLASS = 'isle-compact-bar';
 /** Style class making the top bar as tall as the closed island. */
 const NOTCH_BAR_CLASS = 'isle-notch-bar';
-/** Style class making it taller by GAP_PX, the space below the island (as in stylesheet.css). */
-const GAP_CLASS = 'isle-notch-gap';
+/** The space left below the island inside the bar (Settings): the island is this much shorter, the bar
+ * keeps its height, so its other buttons stay centred (#14). */
 const GAP_PX = 4;
+/** The primary (usually left) mouse button, as Clutter numbers it. */
+const PRIMARY_BUTTON = 1;
 
 // Restyles the top bar around the island (black or glass) and hides the clock and its calendar menu.
 // Signals: `height-changed`, `style-changed` (`blendsIn` may have changed), `calendar-requested` (Super+V).
@@ -59,7 +61,13 @@ export class TopBar extends Signals.EventEmitter {
             })),
             settings.connect('changed::compact-top-bar', () => this._applyStyle()),
             settings.connect('changed::island-in-top-bar', () => this._applyStyle()),
-            settings.connect('changed::notch-gap', () => this._applyStyle()),
+            // The bar keeps its height: the island is laid out again for its own.
+            settings.connect('changed::notch-gap', () => {
+                const gap = this._gap;
+                this._applyStyle();
+                if (this._gap !== gap)
+                    this.emit('height-changed');
+            }),
         ];
         this._applyStyle();
         // The panel can be taken over by another extension (Zorin Taskbar, Dash to Panel) and moved to
@@ -69,6 +77,12 @@ export class TopBar extends Signals.EventEmitter {
         this._panelBoxYChanged = Main.layoutManager.panelBox?.connect('notify::y', () => this._onPanelMoved()) ?? 0;
         this.clockShown = !this.isTopPanel;
         this._styleChanged = Main.panel.connect('notify::style', () => this._onPanelStyle());
+        // GNOME 50 and later drag a maximized window from the bar with any button: after a right click on the bar
+        // the window followed the pointer (#27). Only the primary button, as up to GNOME 49; given back on disable.
+        this._dragGesture = Main.panel._clickGesture ?? null;
+        this._dragButtonWas = this._dragGesture?.required_button ?? null;
+        if (this._dragButtonWas === 0)
+            this._dragGesture.required_button = PRIMARY_BUTTON;
 
         this._heightChanged = Main.panel.connect('notify::height', () => this.emit('height-changed'));
 
@@ -203,7 +217,6 @@ export class TopBar extends Signals.EventEmitter {
             [COMPACT_BAR_CLASS]: this._settings.get_boolean('compact-top-bar'),
             [NOTCH_BAR_CLASS]: inBar,
             [GLASS_BAR_CLASS]: this.opacity < SHADOW_BELOW,
-            [GAP_CLASS]: this._gap > 0,
         });
     }
 
@@ -212,7 +225,6 @@ export class TopBar extends Signals.EventEmitter {
         this._syncColor(null);
         setStyleClasses(Main.panel, {
             [BAR_CLASS]: false, [COMPACT_BAR_CLASS]: false, [NOTCH_BAR_CLASS]: false, [GLASS_BAR_CLASS]: false,
-            [GAP_CLASS]: false,
         });
     }
 
@@ -288,6 +300,9 @@ export class TopBar extends Signals.EventEmitter {
         Main.panel.disconnect(this._parentChanged);
         if (this._panelBoxYChanged)
             Main.layoutManager.panelBox.disconnect(this._panelBoxYChanged);
+        // The bar's own drag gesture back as it was (GNOME 50 and later).
+        if (this._dragButtonWas === 0 && this._dragGesture?.required_button === PRIMARY_BUTTON)
+            this._dragGesture.required_button = 0;
         this._dateMenu.menu.disconnect(this._menuChanged);
         this._settings.disconnect(this._superVChanged);
         this._settings.disconnect(this._pagesChanged);

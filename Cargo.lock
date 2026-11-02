@@ -1054,7 +1054,7 @@ dependencies = [
 
 [[package]]
 name = "isle-core"
-version = "1.5.1"
+version = "1.5.3"
 dependencies = [
  "chrono",
  "serde",
@@ -1063,7 +1063,7 @@ dependencies = [
 
 [[package]]
 name = "isle-daemon"
-version = "1.5.1"
+version = "1.5.3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1085,7 +1085,7 @@ dependencies = [
 
 [[package]]
 name = "isle-shelf"
-version = "1.5.1"
+version = "1.5.3"
 dependencies = [
  "env_logger",
  "gdk4-x11",
@@ -1098,7 +1098,7 @@ dependencies = [
 
 [[package]]
 name = "isle-whisper"
-version = "1.5.1"
+version = "1.5.3"
 dependencies = [
  "isle-core",
  "libc",

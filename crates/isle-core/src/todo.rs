@@ -96,9 +96,7 @@ impl TodoList {
 
     /// Notes that a task's due alert was shown (or, snoozed, that it was not); false when not found.
     pub fn set_alerted(&mut self, id: u64, alerted: bool) -> bool {
-        self.find(id)
-            .map(|item| item.alerted = alerted)
-            .is_some()
+        self.find(id).map(|item| item.alerted = alerted).is_some()
     }
 
     /// Deletes a task; returns whether it was there.

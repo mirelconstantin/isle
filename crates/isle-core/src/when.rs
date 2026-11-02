@@ -46,7 +46,10 @@ pub fn parse(line: &str, now: NaiveDateTime) -> When {
     // "in 10 minutes", "in 2h", "in 90 min": a delay from now, no day involved.
     if let Some((from, to, at)) = relative(&lower, now) {
         used[from..to].iter_mut().for_each(|word| *word = true);
-        return When { title: title(&words, &used), at: Some(at) };
+        return When {
+            title: title(&words, &used),
+            at: Some(at),
+        };
     }
 
     let day = day(&lower, now);
@@ -77,7 +80,11 @@ pub fn parse(line: &str, now: NaiveDateTime) -> When {
         (None, Some(minutes)) => {
             let today = at_time(now.date(), minutes);
             // A time already past today means tomorrow.
-            Some(if today <= now { today + Duration::days(1) } else { today })
+            Some(if today <= now {
+                today + Duration::days(1)
+            } else {
+                today
+            })
         }
         (None, None) => None,
     };
@@ -103,7 +110,11 @@ fn day(words: &[String], now: NaiveDateTime) -> Option<(usize, usize, NaiveDate,
         }
         // "on 3 Nov", "3 Nov", "Nov 3": the month either side of the day.
         if let Some((from, to, date)) = date_at(words, i, today) {
-            let from = if i > 0 && words[i - 1] == "on" { i - 1 } else { from };
+            let from = if i > 0 && words[i - 1] == "on" {
+                i - 1
+            } else {
+                from
+            };
             return Some((from, to, date, DATE_HOUR, Kind::Date));
         }
     }
@@ -117,7 +128,10 @@ fn date_at(words: &[String], i: usize, today: NaiveDate) -> Option<(usize, usize
         let day: u32 = digits.parse().ok()?;
         (1..=31).contains(&day).then_some(day)
     };
-    let (day, month) = match (day(&words[i]), words.get(i + 1).and_then(|word| month(word))) {
+    let (day, month) = match (
+        day(&words[i]),
+        words.get(i + 1).and_then(|word| month(word)),
+    ) {
         (Some(day), Some(month)) => (day, month),
         _ => (day(words.get(i + 1)?)?, month(&words[i])?),
     };
@@ -160,7 +174,8 @@ fn weekday(word: &str) -> Option<Weekday> {
 
 /// The first `weekday` on or after `today`.
 fn next_weekday(today: NaiveDate, weekday: Weekday) -> NaiveDate {
-    let days = weekday.num_days_from_monday() as i64 - today.weekday().num_days_from_monday() as i64;
+    let days =
+        weekday.num_days_from_monday() as i64 - today.weekday().num_days_from_monday() as i64;
     today + Duration::days(days.rem_euclid(7))
 }
 
@@ -233,7 +248,10 @@ mod tests {
 
     fn when(line: &str) -> (String, Option<String>) {
         let when = parse(line, now());
-        (when.title, when.at.map(|at| at.format("%Y-%m-%d %H:%M").to_string()))
+        (
+            when.title,
+            when.at.map(|at| at.format("%Y-%m-%d %H:%M").to_string()),
+        )
     }
 
     #[test]
