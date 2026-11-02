@@ -61,7 +61,9 @@ fn due_from(due_ms: i64) -> fdo::Result<Option<i64>> {
         return Ok(None);
     }
     if due_ms - now_ms() > MAX_AHEAD_MS {
-        return Err(fdo::Error::InvalidArgs("a reminder is at most a year away".into()));
+        return Err(fdo::Error::InvalidArgs(
+            "a reminder is at most a year away".into(),
+        ));
     }
     Ok(Some(due_ms))
 }
@@ -94,7 +96,10 @@ fn adopt_reminders(list: &mut TodoList, path: &std::path::Path) -> bool {
         return false;
     };
     let Ok(old) = serde_json::from_slice::<Old>(&bytes) else {
-        warn!("could not read {}; the timed reminders were left as they are", path.display());
+        warn!(
+            "could not read {}; the timed reminders were left as they are",
+            path.display()
+        );
         return false;
     };
     for reminder in old.items {
@@ -103,7 +108,10 @@ fn adopt_reminders(list: &mut TodoList, path: &std::path::Path) -> bool {
     // Kept aside rather than deleted: nothing is lost if the fold was wrong. Moved or emptied either way,
     // so the next start does not fold the same reminders in twice.
     if let Err(err) = std::fs::rename(path, path.with_extension("json.migrated")) {
-        warn!("could not move {} aside: {err}; emptying it instead", path.display());
+        warn!(
+            "could not move {} aside: {err}; emptying it instead",
+            path.display()
+        );
         if let Err(err) = std::fs::write(path, br#"{"items":[],"next_id":0}"#) {
             warn!("could not empty {}: {err}", path.display());
         }
@@ -262,7 +270,11 @@ mod tests {
         std::fs::write(&path, r#"{"items":[{"id":1,"text":"Tea","due_ms":1000},{"id":2,"text":"Bank","due_ms":2000}],"next_id":2}"#).unwrap();
         let mut list = TodoList::default();
         assert!(adopt_reminders(&mut list, &path));
-        let titles: Vec<_> = list.items().iter().map(|item| item.title.as_str()).collect();
+        let titles: Vec<_> = list
+            .items()
+            .iter()
+            .map(|item| item.title.as_str())
+            .collect();
         assert_eq!(titles, ["Tea", "Bank"]);
         assert_eq!(list.items()[0].due_ms, Some(1000));
         // The file is out of the way, so a second start does not add them again.

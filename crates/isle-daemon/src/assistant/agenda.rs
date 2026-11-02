@@ -173,7 +173,11 @@ mod tests {
         let due = now().timestamp_millis() + 4 * 3600 * 1000 + 30 * 60 * 1000;
         let mut tea = todo(1, "Tea\nnow", false);
         tea.due_ms = Some(due);
-        let todos = [todo(2, "Buy milk", false), todo(3, "Done already", true), tea];
+        let todos = [
+            todo(2, "Buy milk", false),
+            todo(3, "Done already", true),
+            tea,
+        ];
         let events = [
             event(1, "2026-10-20", None, None, "Yesterday"),
             event(2, "2026-10-21", Some("09:00"), Some("09:15"), "Standup"),

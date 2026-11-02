@@ -182,7 +182,10 @@ async fn run() -> anyhow::Result<()> {
     ));
     let calendar = server.interface::<_, CalendarService>(OBJECT_PATH).await?;
     tokio::spawn(calendar::send_waiting(calendar.clone(), session.clone()));
-    let own_data = assistant::Sources { todo: todo.clone(), calendar };
+    let own_data = assistant::Sources {
+        todo: todo.clone(),
+        calendar,
+    };
 
     let session_for_media = session.clone();
     tokio::spawn(async move {

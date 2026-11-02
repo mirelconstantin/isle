@@ -951,7 +951,9 @@ fn cases() -> Vec<Case> {
         case(&["ingetin aku minum obat 30 menit lagi"], |a| {
             let a = last(a);
             ensure(
-                action(a, "remind")?["when"].as_str().is_some_and(|when| when.contains("30")),
+                action(a, "remind")?["when"]
+                    .as_str()
+                    .is_some_and(|when| when.contains("30")),
                 "not in 30 minutes",
             )?;
             indonesian(a)
@@ -1259,7 +1261,9 @@ fn cases() -> Vec<Case> {
             |a| {
                 let a = last(a);
                 ensure(
-                    action(a, "remind")?["when"].as_str().is_some_and(|when| when.contains("20")),
+                    action(a, "remind")?["when"]
+                        .as_str()
+                        .is_some_and(|when| when.contains("20")),
                     "did not change to 20",
                 )?;
                 // The first reminder got id 100: it must go, not stay as a second one.
