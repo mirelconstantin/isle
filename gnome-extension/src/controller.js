@@ -1122,7 +1122,8 @@ export class Controller {
         const inBar = this._settings.get_boolean('island-in-top-bar') && this._barHeight > 0;
         // Inside the bar it leaves the bar's last few pixels free (Settings), open as well as closed. Its size
         // comes from the bar, not from `top`: off the bar the island keeps it and hangs from the screen.
-        const band = this._barHeight - (inBar ? this._topBar.gap : 0);
+        const gap = this._topBar.gap;
+        const band = this._barHeight - (inBar && Number.isFinite(gap) ? gap : 0);
         // Before measuring it: inside the bar it is smaller.
         this._compact.inBar = inBar;
 

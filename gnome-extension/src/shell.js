@@ -44,6 +44,9 @@ export class TopBar extends Signals.EventEmitter {
         /** What Isle itself hid or widened, so a taskbar's own choices are never overwritten. */
         this._clockHidden = false;
         this._widthReserved = false;
+        // The space below the island, in CSS pixels. Set from the settings before anything reads it: a bar
+        // that is not a top bar yet (early at login) leaves `_applyStyle` before it would set this.
+        this._gap = 0;
 
         this._settingsChanged = [
             ...['top-bar-style', 'top-bar-opacity', 'island-theme'].map(key => settings.connect(`changed::${key}`, () => {
@@ -98,7 +101,7 @@ export class TopBar extends Signals.EventEmitter {
 
     /** The space below the closed island inside the bar, in stage pixels: part of `height`. */
     get gap() {
-        return this._gap * uiScale();
+        return (Number.isFinite(this._gap) ? this._gap : 0) * uiScale();
     }
 
     /** Super+V opens Isle's clipboard, unless left to GNOME or the Shelf page is left out. */
@@ -184,14 +187,16 @@ export class TopBar extends Signals.EventEmitter {
     /** Colour and style classes from the settings; remembers `blendsIn` to spot a change. */
     _applyStyle() {
         this._blended = this.blendsIn;
+        // From the settings, before the panel is asked about: a bar that is not a top bar yet would leave
+        // this unset, and the island is sized from it (a NaN height is a full-screen island).
+        const inBar = this._settings.get_boolean('island-in-top-bar');
+        this._gap = inBar && this._settings.get_boolean('notch-gap') ? GAP_PX : 0;
         if (!this.isTopPanel) {
             this._clearBar();
             this._restoreClock();
             return;
         }
         this._syncColor();
-        const inBar = this._settings.get_boolean('island-in-top-bar');
-        this._gap = inBar && this._settings.get_boolean('notch-gap') ? GAP_PX : 0;
         // The bar's height changes with these; `height-changed` re-lays out the island.
         setStyleClasses(Main.panel, {
             [BAR_CLASS]: true,
