@@ -13,7 +13,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as Signals from 'resource:///org/gnome/shell/misc/signals.js';
 import {getMixerControl} from 'resource:///org/gnome/shell/ui/status/volume.js';
 
-import {BROWSERS, callStreamOf, callWindowIndex, isEngineName, ownerOfDump, serviceOf, streamOwner} from './callServices.js';
+import {BROWSERS, callStreamOf, callWindowIndex, isEngineName, keysMatchApp, ownerOfDump, serviceOf, streamOwner} from './callServices.js';
 import {LEVEL_METERS} from './privacy.js';
 
 /** The microphone must be held this long to count: sites open it briefly to ask for permission. */
@@ -51,14 +51,13 @@ function parentOf(pid) {
     }
 }
 
-/** Whether `app` is the one a stream with `keys` comes from ("Google Chrome", "firefox_firefox"…). */
+/** Whether `app` is the one a stream with `keys` comes from ("Google Chrome", "firefox_firefox", "zen"). */
 function appMatches(app, keys) {
     const executable = app.get_app_info()?.get_executable();
     const names = [app.get_id()?.replace(/\.desktop$/, ''), app.get_name(), executable && GLib.path_get_basename(executable)]
         .filter(Boolean)
         .map(name => name.toLowerCase());
-    return keys.some(key => names.some(name =>
-        key === name || (name.length >= 4 && key.includes(name)) || (key.length >= 4 && name.includes(key))));
+    return keysMatchApp(keys, names);
 }
 
 /** Signals: `changed` (the call, its window or the mute), `started`. */
@@ -77,6 +76,8 @@ export class CallMonitor extends Signals.EventEmitter {
         this.window = null;
         /** The call's microphone stream. */
         this._stream = null;
+        /** What `wpctl` was asked for, when Gvc did not answer for the microphone. */
+        this._forcedMute = false;
         /** The stream whose mute is followed, and its handlers. */
         this._mutedStream = null;
         this._streamIds = [];
@@ -117,26 +118,51 @@ export class CallMonitor extends Signals.EventEmitter {
         return this.active && this._privacy.camera;
     }
 
-    /** Whether the call's microphone is muted: its own stream, or the input it records from. */
+    /** Whether the call's microphone is muted: its own stream, the input it records from, or what `wpctl` was
+     * asked for when neither answered. */
     get muted() {
-        return Boolean(this._stream?.is_muted || this._source?.is_muted);
+        return Boolean(this._forcedMute || this._stream?.is_muted || this._source?.is_muted);
     }
 
     /** Mutes or unmutes the call's microphone from the call's button. */
     toggleMuted() {
         const wanted = !this.muted;
-        let done = false;
+        this._forcedMute = false;
+        let asked = false;
         // The call's own stream first, so that app alone is silenced (and a call recording from an input that is
         // not the default one still answers), then the default input as GNOME's own microphone toggle does.
         for (const target of [this._stream, this._source]) {
             if (!target)
                 continue;
             target.change_is_muted(wanted);
-            done = true;
+            asked = true;
         }
-        if (!done)
-            console.warn('Isle: no microphone to mute for this call');
-        return done;
+        // Gvc carries neither on some PipeWire systems (a stream's mute, or an input it has not been told of):
+        // the default input is asked through `wpctl`, which needs no pactl, and the button follows the asking.
+        this._later('mute', asked ? 250 : 0, () => {
+            if (this.muted === wanted) {
+                console.log(`Isle: mute → ${wanted}, by Gvc`);
+                return;
+            }
+            this._forcedMute = wanted;
+            this._wpctlMute(wanted);
+            this._changed();
+            console.log(`Isle: mute → ${wanted}, by wpctl (Gvc had stream ${this._stream?.is_muted ?? 'none'}, ` +
+                `source ${this._source?.is_muted ?? 'none'})`);
+        });
+        return true;
+    }
+
+    /** `wpctl set-mute @DEFAULT_AUDIO_SOURCE@ 0|1`: the microphone, without Gvc or pactl. */
+    _wpctlMute(muted) {
+        try {
+            const launcher = new Gio.SubprocessLauncher({
+                flags: Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_SILENCE,
+            });
+            launcher.spawnv(['wpctl', 'set-mute', '@DEFAULT_AUDIO_SOURCE@', muted ? '1' : '0']);
+        } catch {
+            console.warn('Isle: wpctl is not there to mute the microphone');
+        }
     }
 
     /** Whether an app besides the call's is using the microphone, which then still gets its dot. */
@@ -162,6 +188,7 @@ export class CallMonitor extends Signals.EventEmitter {
     /** Brings the call's window, or else its app, to the front; false when there is neither. */
     raise() {
         const window = this.window;
+        console.log(`Isle: open → ${window?.get_title() ?? 'no window'} (${this.app?.get_name() ?? 'app not known'})`);
         if (window) {
             // From the taskbar too: activating a minimised window leaves it minimised.
             if (window.minimized)
@@ -226,7 +253,10 @@ export class CallMonitor extends Signals.EventEmitter {
         this._streamIds = [];
         this._mutedStream = stream;
         if (stream)
-            this._streamIds = [stream.connect('notify::is-muted', () => this._changed())];
+            this._streamIds = [stream.connect('notify::is-muted', () => {
+            this._forcedMute = false;
+            this._changed();
+        })];
     }
 
     /** The microphone is still held after the delay: the call is on. */
@@ -246,6 +276,8 @@ export class CallMonitor extends Signals.EventEmitter {
 
     /** Clears the call and its window. */
     _end() {
+        this._forcedMute = false;
+        this._cancel('mute');
         this._cancel('recheck');
         this._cancel('standIn');
         this._standIn = false;
@@ -500,7 +532,10 @@ export class CallMonitor extends Signals.EventEmitter {
         this._sourceIds = [];
         this._source = this._mixer.get_default_source();
         if (this._source)
-            this._sourceIds = [this._source.connect('notify::is-muted', () => this._changed())];
+            this._sourceIds = [this._source.connect('notify::is-muted', () => {
+            this._forcedMute = false;
+            this._changed();
+        })];
         this._changed();
     }
 

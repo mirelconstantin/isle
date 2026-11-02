@@ -47,6 +47,14 @@ const ENGINE_NAMES = /webrtc|voice ?engine/i;
 /** Browsers, whose tabs hold web calls (Meet, Zoom, Teams on the web...). */
 export const BROWSERS = /chrom|firefox|brave|edge|vivaldi|opera|epiphany|librewolf|zen/i;
 
+/** Whether a stream's `keys` (its app's id, name and icon) name an app whose own names are `names`: equal, or
+ * one holding the other when it is long enough to mean something — "zen" names app.zen_browser.zen, and a
+ * two-letter key names nothing. */
+export function keysMatchApp(keys, names) {
+    return keys.some(key => names.some(name =>
+        key === name || (name.length >= 3 && key.includes(name)) || (key.length >= 3 && name.includes(key))));
+}
+
 /** Whether a microphone stream's name is its voice engine's, not its app's: never one to show. */
 export function isEngineName(name) {
     return ENGINE_NAMES.test(name ?? '');

@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 
-import {callStreamOf, callWindowIndex, isEngineName, ownerOfDump, serviceOf, streamOwner} from '../../gnome-extension/src/callServices.js';
+import {callStreamOf, callWindowIndex, isEngineName, keysMatchApp, ownerOfDump, serviceOf, streamOwner} from '../../gnome-extension/src/callServices.js';
 
 const chrome = (title, focused = false) => ({title: `${title} - Google Chrome`, focused});
 
@@ -74,6 +74,17 @@ test('else the most recently used, and none without a service', () => {
     assert.equal(callWindowIndex([chrome('(4) WhatsApp'), chrome('Telegram Web')]), 0);
     assert.equal(callWindowIndex([chrome('Tulis Lab'), chrome('YouTube')]), -1);
     assert.equal(callWindowIndex([]), -1);
+});
+
+test('a stream names its app, however short or dotted the names are', () => {
+    // Zen is a Flatpak: the stream says "Zen", the app is app.zen_browser.zen, named "Zen Browser".
+    assert.ok(keysMatchApp(['zen'], ['app.zen_browser.zen', 'zen browser', 'zen']));
+    assert.ok(keysMatchApp(['discord'], ['com.discordapp.discord', 'discord']));
+    // A browser's own name is not the page's: "Chromium input" is found by its process, not by this match.
+    assert.equal(keysMatchApp(['chromium input'], ['google-chrome', 'google chrome', 'chrome']), false);
+    // Too short to mean anything, and never a match the other way round.
+    assert.equal(keysMatchApp(['tv'], ['tvtime', 'tv time']), false);
+    assert.equal(keysMatchApp(['zoom'], ['slack']), false);
 });
 
 test('a stream is traced to its process in pw-dump too, where pactl is not installed', () => {
