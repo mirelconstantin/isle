@@ -152,7 +152,7 @@ npx eslint gnome-extension
 node --test tests/extension/*.test.js
 glib-compile-schemas --strict --dry-run gnome-extension/schemas
 cargo check -p isle-core -p isle-daemon
-cargo test  -p isle-core
+cargo test  -p isle-core -p isle-daemon
 ```
 
 `cargo` writes to `~/.cargo` and `target/`; where those are read-only, point it
@@ -161,8 +161,8 @@ inside the tree and delete them after:
 
 `cargo test -p isle-daemon` has five tests that need a session bus and a
 writable `/proc` (`assistant::agent`, `assistant::tasks`,
-`media::mpris::bus_tests`); they fail in a sandbox with *Failed to query
-AppArmor policy* and pass on a desktop session.
+`media::mpris::bus_tests`); without a session bus they fail with *Failed to
+query AppArmor policy* and pass on a desktop session.
 
 One check that catches what lint cannot — an import upstream renamed:
 
