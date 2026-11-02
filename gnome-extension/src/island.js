@@ -153,6 +153,8 @@ const RimLight = shaderEffect('RimLight', RIM_UNIFORMS, rimCode(effectPoint('fra
 /** Cross-fade timings in milliseconds. */
 const FADE_OUT = 160;
 const FADE_IN = 320;
+/** How long auto-hide takes to fade the island out or back in. */
+const AUTO_HIDE_FADE = 180;
 /** The incoming view waits for the shape to make room before appearing. */
 const FADE_IN_DELAY = 120;
 /** How far (CSS px) the views slide as the shape grows or shrinks: they travel with it. Whole
@@ -183,6 +185,8 @@ export const Island = GObject.registerClass({
         /** Height of the top bar the island grows out of; 0 for none. */
         this._topInset = 0;
         this._hovered = false;
+        this._autoHidden = false;
+        this._band = 0;
         this._monitor = null;
         this._view = null;
         this._pointerAtMorph = null;
@@ -443,6 +447,51 @@ export const Island = GObject.registerClass({
             this._driver.start();
         }
         this._showView(view, growing);
+    }
+
+    /** Fades the closed island away for auto-hide (its view hidden then, so nothing ticks unseen), or back.
+     * Hidden, only its top `band` px take the pointer (see `vfunc_pick`). */
+    setAutoHidden(hidden, band = 0) {
+        this._band = band;
+        if (hidden === this._autoHidden)
+            return;
+        this._autoHidden = hidden;
+        this.remove_transition('opacity');
+        if (!St.Settings.get().enable_animations) {
+            this.opacity = hidden ? 0 : 255;
+            if (hidden)
+                this._view?.hide();
+            else
+                this._view?.show();
+            return;
+        }
+        if (hidden) {
+            this.ease({
+                opacity: 0,
+                duration: AUTO_HIDE_FADE,
+                mode: Clutter.AnimationMode.EASE_IN_QUAD,
+                onStopped: finished => {
+                    if (finished && this._autoHidden)
+                        this._view?.hide();
+                },
+            });
+            return;
+        }
+        this._view?.show();
+        this.ease({opacity: 255, duration: AUTO_HIDE_FADE, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
+    }
+
+    /** Faded away, the island leaves what is under it to the pointer: only its top band brings it back. */
+    vfunc_pick(context) {
+        if (!this._autoHidden) {
+            // Clutter picks the children itself only for a class that keeps its own pick: here, they are picked too.
+            super.vfunc_pick(context);
+            for (const child of this.get_children())
+                child.pick(context);
+            return;
+        }
+        if (this._band > 0)
+            this.pick_box(context, new Clutter.ActorBox({x1: 0, y1: 0, x2: this.width, y2: this._band}));
     }
 
     /** Shows `view` out of sight and reach (or hides it again) while the island rests closed, so its next

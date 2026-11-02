@@ -6,9 +6,14 @@ moves quickly — 1.5.1 rewrote the closed island, the island's drawing and the
 MPRIS client — so this file exists to make the next merge boring: what we add,
 which upstream code it leans on, and what to do when that code moves.
 
-Merged up to **upstream v1.5.3** (`5f2ac15`, in `b9fc525`); our own work sits
-on top of it. `docs/plan-reminders.md` records why timed reminders are built the
-way they are.
+Merged up to **upstream v1.6.0** (`33e580d`); our own work sits on top of it.
+`docs/plan-reminders.md` records why timed reminders are built the way they are.
+
+1.6.0 rewrote how a call is found (`isCallApp`, `webCallShown`, a stream's verdict, and the window it
+began in), which is the same ground our fork had reworked: **upstream's detection is the trunk now**, and
+our hunks inside it are the mute on the call's own stream (Gvc, then `wpctl` by node), `raise()` out of the
+taskbar, and the app-name match (`keysMatchApp`) that a three-letter name like "Zen" needs. Upstream also
+still ships `Reminders1`; the merge keeps it deleted, as our `Todo1` took its rows.
 
 ## Rules
 
@@ -81,7 +86,7 @@ The others, in order of how often they bite:
 | `pages/timer.js` | `WEEK_DAYS`, `focusTime`, `dayKey`, the task/stats/next rows, `meeting-requested`, `get tint` | Take upstream's `_init`, steppers and locking, then add our three builders to the steppers column |
 | `notifications.js`, `pages/notifications.js`, `focusMode.js` | timed DND | Keep upstream's DND handling, keep `dndUntil` and the ownership dance |
 | `pages/shelf.js`, `pages/clips.js` | stack mode, retention, search filters | Keep both; the cards' click path is ours |
-| `callServices.js`, `call.js`, `pages/call.js` | the service list and its order (Zoom and the rest before "meet"), the `pw-dump` fallback for the stream's owner, an app's call keeping to its own windows, the mute on the call's own stream, `raise()` out of the taskbar, the preview kept while sharing with its pill | Keep ours; the preview's layers (`_view`, `_placeholder`, `_corners`, `_hover`, `_badge`) and the two settings keys |
+| `callServices.js`, `call.js`, `pages/call.js` | the service list and its order (Zoom and the rest before "meet"), `keysMatchApp` for a short app name, the `pw-dump` nodes the mute needs, the mute on the call's own stream (never the input), `raise()` out of the taskbar, the preview kept while sharing with its pill | Take upstream's detection (its verdicts, `webCallShown`, the stream owners from `privacy.js`) and re-apply those hunks; the preview's layers (`_view`, `_placeholder`, `_corners`, `_hover`, `_badge`) and the two settings keys stay ours |
 | `pages/calendar.js` | `next-event`, `refreshNextEvent`, `todayEvents`, `get tint` | Keep both; upstream's `_scheduleAlarm` is where `_syncNextEvent()` is called |
 | `prefs.js`, the gschema | the keys below, the Shortcuts group, Devices in `PAGES`, `intChoiceRow` | Keep both; `glib-compile-schemas --strict` catches duplicate keys |
 | Rust | `isle-core/pomodoro.rs` (history), `isle-daemon/pomodoro.rs` (`State.history`), `clipboard.rs` (`SetRetention`), `system/bluetooth.rs` (UPower HID++ devices) | Upstream rarely touches these; if it does, keep our fields and re-run `cargo test -p isle-core` |
