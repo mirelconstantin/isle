@@ -89,6 +89,9 @@ All notable changes to Isle are listed here. The format follows
 - Moving a repeating reminder's time no longer stops it coming back: the sheet keeps its rule unless the
   words name another ("every monday"), and the assistant's reschedule leaves it alone too.
 - The command surface ranks an action's own name above a word that only appears in its keywords.
+- Enter in the new-reminder field adds the reminder again. isled answers a task's 64-bit id, which GJS
+  hands back as an array (`[7]`), and the page took that for a failed call: the words stayed in the field
+  and nothing was added.
 
 ## [1.6.0] - 2026-11-03
 

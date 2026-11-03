@@ -12,6 +12,7 @@ import Pango from 'gi://Pango';
 import St from 'gi://St';
 
 import {VERTICAL} from '../compat.js';
+import {toNumber} from '../dbusValues.js';
 import * as Format from '../format.js';
 import {order, repeatText, whenText} from '../reminderRules.js';
 import {WhenSheet} from '../whenSheet.js';
@@ -280,9 +281,11 @@ export const TasksPage = GObject.registerClass({
                 due = parsed.due_ms;
                 repeat = parsed.repeat ?? '';
             }
-            const id = await this.daemon.call('todo', 'Add', title, due, repeat);
+            // A 64-bit id comes back as an array (see `toNumber`): without it, a call that worked would look
+            // like one that failed, and the field would keep the words for ever.
+            const id = toNumber(await this.daemon.call('todo', 'Add', title, due, repeat));
             // isled could not be asked: the words stay where they are, and its own alert says why.
-            if (!Number.isInteger(id))
+            if (!Number.isSafeInteger(id) || id <= 0)
                 return;
             // Only if nothing was typed meanwhile.
             if (this._entry.text.trim() === text) {
